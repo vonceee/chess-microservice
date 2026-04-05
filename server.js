@@ -43,7 +43,10 @@ const matchmakingQueue = []; // Queue for matchmaking
 //     white: { timer: Timeout | null, startTime: Date | null },
 //     black: { timer: Timeout | null, startTime: Date | null }
 //   },
-//   opponentAwayCountdown: number | null  // seconds remaining for opponent return
+//   opponentAwayCountdown: number | null,  // seconds remaining for opponent return
+//   bufferCountdown: number | null,        // seconds remaining in buffer period
+//   bufferTimer: Timeout | null,           // buffer countdown timer
+//   gameStartedAt: Date | null             // when game actually started (after buffer)
 // }
 
 // Authentication middleware for Socket.io
@@ -112,10 +115,17 @@ function createGame(gameData) {
       white: { timer: null, startTime: null },
       black: { timer: null, startTime: null }
     },
-    opponentAwayCountdown: null
+    opponentAwayCountdown: null,
+    bufferCountdown: 5, // 5 seconds buffer before game starts
+    bufferTimer: null,
+    gameStartedAt: null
   };
 
   games.set(gameId, game);
+
+  // Start buffer countdown for the new game
+  startBufferCountdown(game);
+
   return game;
 }
 
@@ -228,6 +238,36 @@ function clearAbandonmentTimer(game, color) {
     game.abandonmentTimers[color].startTime = null;
     game.opponentAwayCountdown = null;
   }
+}
+
+// Helper function to start buffer countdown for new games
+function startBufferCountdown(game) {
+  game.bufferCountdown = 5;
+  game.gameStartedAt = null;
+
+  game.bufferTimer = setInterval(() => {
+    game.bufferCountdown--;
+
+    // Notify both players of buffer countdown
+    io.to(game.id).emit('buffer_countdown', {
+      gameId: game.id,
+      secondsRemaining: game.bufferCountdown
+    });
+
+    // When buffer reaches 0, start the actual game
+    if (game.bufferCountdown <= 0) {
+      clearInterval(game.bufferTimer);
+      game.bufferTimer = null;
+      game.bufferCountdown = null;
+      game.gameStartedAt = new Date();
+
+      // Notify players that game has started
+      io.to(game.id).emit('game_started', {
+        gameId: game.id,
+        gameStartedAt: game.gameStartedAt.toISOString()
+      });
+    }
+  }, 1000);
 }
 
 // Helper function to abandon a game
@@ -365,7 +405,8 @@ io.on('connection', (socket) => {
         whiteTimeRemainingMs: effectiveTimes.whiteTimeRemainingMs,
         blackTimeRemainingMs: effectiveTimes.blackTimeRemainingMs,
         serverTimestamp: effectiveTimes.serverTimestamp,
-        opponentAwayCountdown: game.opponentAwayCountdown
+        opponentAwayCountdown: game.opponentAwayCountdown,
+        bufferCountdown: game.bufferCountdown
       },
       playerColor,
       legalMoves: getLegalMoves(game.fen)
@@ -473,7 +514,8 @@ io.on('connection', (socket) => {
       isCheckmate: game.status === 'completed' && game.termination === 'checkmate',
       isStalemate: game.status === 'completed' && game.termination === 'stalemate',
       isDraw: game.status === 'completed' && game.termination === 'draw',
-      opponentAwayCountdown: game.opponentAwayCountdown
+      opponentAwayCountdown: game.opponentAwayCountdown,
+      bufferCountdown: game.bufferCountdown
     });
 
     // If game ended, also emit game_ended
@@ -791,7 +833,8 @@ app.post('/api/move', express.json(), (req, res) => {
     isCheckmate: game.status === 'completed' && game.termination === 'checkmate',
     isStalemate: game.status === 'completed' && game.termination === 'stalemate',
     isDraw: game.status === 'completed' && game.termination === 'draw',
-    opponentAwayCountdown: game.opponentAwayCountdown
+    opponentAwayCountdown: game.opponentAwayCountdown,
+    bufferCountdown: game.bufferCountdown
   };
 
     // Broadcast move to game room
@@ -980,6 +1023,11 @@ function cleanupTimers() {
   for (const [gameId, game] of games) {
     clearAbandonmentTimer(game, 'white');
     clearAbandonmentTimer(game, 'black');
+    // Clear buffer timer
+    if (game.bufferTimer) {
+      clearInterval(game.bufferTimer);
+      game.bufferTimer = null;
+    }
   }
 }
 

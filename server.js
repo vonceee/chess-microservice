@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { Chess } = require('chess.js');
-const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
@@ -14,8 +13,8 @@ const io = new Server(server, {
   }
 });
 
-// JWT secret - should be from environment variable
-const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret';
+// API URL for token validation - should be from environment variable
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8000';
 
 // In-memory storage for games
 const games = new Map(); // gameId -> game state
@@ -51,32 +50,54 @@ const matchmakingQueue = []; // Queue for matchmaking
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
+    const providedUserId = socket.handshake.auth.userId;
+    const providedUserName = socket.handshake.auth.userName;
 
-    if (!token) {
+    if (!token && !providedUserId) {
       return next(new Error('Authentication error'));
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET);
+    // For production, validate token with Laravel API
+    if (token && API_BASE_URL) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/user`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json'
+          }
+        });
 
-    socket.userId = decoded.sub || decoded.id;
-    socket.userName = decoded.name || 'Anonymous';
+        if (response.ok) {
+          const userData = await response.json();
+          socket.userId = String(userData.id);
+          socket.userName = userData.name;
+        } else {
+          throw new Error('Token validation failed');
+        }
+      } catch (apiError) {
+        console.log('API validation failed, using provided credentials:', apiError.message);
+        // Fallback to provided credentials if API validation fails
+        if (providedUserId) {
+          socket.userId = String(providedUserId);
+          socket.userName = providedUserName || 'Test User';
+        } else {
+          return next(new Error('Authentication error'));
+        }
+      }
+    } else if (providedUserId) {
+      // Development fallback: use provided credentials
+      socket.userId = String(providedUserId);
+      socket.userName = providedUserName || 'Test User';
+    } else {
+      return next(new Error('Authentication error'));
+    }
 
     // Store active player
     activePlayers.set(socket.userId, socket.id);
-
     next();
   } catch (err) {
-    // Fallback: use provided userId and userName from auth (passed from Angular app)
-    const providedUserId = socket.handshake.auth.userId;
-    if (providedUserId) {
-      socket.userId = String(providedUserId);
-      socket.userName = socket.handshake.auth.userName || 'Test User';
-    } else {
-      socket.userId = 'test-user-' + socket.id;
-      socket.userName = 'Test User';
-    }
-    activePlayers.set(socket.userId, socket.id);
-    next();
+    console.log('Authentication error:', err.message);
+    return next(new Error('Authentication error'));
   }
 });
 
@@ -1003,4 +1024,5 @@ process.on('SIGTERM', () => {
 const PORT = process.env.PORT || 3006;
 server.listen(PORT, () => {
   console.log(`Chess microservice listening on port ${PORT}`);
+  console.log(`API Base URL: ${API_BASE_URL || 'not configured'}`);
 });

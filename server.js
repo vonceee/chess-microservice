@@ -56,6 +56,13 @@ io.use(async (socket, next) => {
     const providedUserId = socket.handshake.auth.userId;
     const providedUserName = socket.handshake.auth.userName;
 
+    console.log('Socket auth attempt:', {
+      socketId: socket.id,
+      hasToken: !!token,
+      providedUserId,
+      providedUserName
+    });
+
     if (!token && !providedUserId) {
       return next(new Error('Authentication error'));
     }

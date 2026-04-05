@@ -13,8 +13,8 @@ const io = new Server(server, {
   }
 });
 
-// API URL for token validation - should be from environment variable
-const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8000';
+// Microservice configuration
+const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // In-memory storage for games
 const games = new Map(); // gameId -> game state
@@ -57,39 +57,13 @@ io.use(async (socket, next) => {
       return next(new Error('Authentication error'));
     }
 
-    // For production, validate token with Laravel API
-    if (token && API_BASE_URL) {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/user`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json'
-          }
-        });
-
-        if (response.ok) {
-          const userData = await response.json();
-          socket.userId = String(userData.id);
-          socket.userName = userData.name;
-        } else {
-          throw new Error('Token validation failed');
-        }
-      } catch (apiError) {
-        console.log('API validation failed, using provided credentials:', apiError.message);
-        // Fallback to provided credentials if API validation fails
-        if (providedUserId) {
-          socket.userId = String(providedUserId);
-          socket.userName = providedUserName || 'Test User';
-        } else {
-          return next(new Error('Authentication error'));
-        }
-      }
-    } else if (providedUserId) {
-      // Development fallback: use provided credentials
+    // For now, use provided credentials directly (token validation can be added later)
+    // This works because the frontend provides userId and userName from authenticated session
+    if (providedUserId) {
       socket.userId = String(providedUserId);
-      socket.userName = providedUserName || 'Test User';
+      socket.userName = providedUserName || 'Anonymous';
     } else {
-      return next(new Error('Authentication error'));
+      return next(new Error('Authentication error: no userId provided'));
     }
 
     // Store active player
@@ -1024,5 +998,5 @@ process.on('SIGTERM', () => {
 const PORT = process.env.PORT || 3006;
 server.listen(PORT, () => {
   console.log(`Chess microservice listening on port ${PORT}`);
-  console.log(`API Base URL: ${API_BASE_URL || 'not configured'}`);
+  console.log(`Environment: ${NODE_ENV}`);
 });

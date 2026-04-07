@@ -51,6 +51,7 @@ async function finalizeGame(game, io) {
       status: game.status,
       result: game.result,
       termination: game.termination,
+      moves: game.moves,
       ...(ratingData || {})
     };
 

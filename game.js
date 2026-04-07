@@ -44,12 +44,18 @@ function createGame(gameData) {
     whitePlayer: {
       userId: whitePlayer.userId,
       socketId: '',
-      name: whitePlayer.name
+      name: whitePlayer.name,
+      rating: whitePlayer.rating || 1500,
+      rd: whitePlayer.rd || 350,
+      vol: whitePlayer.vol || 0.06
     },
     blackPlayer: {
       userId: blackPlayer.userId,
       socketId: '',
-      name: blackPlayer.name
+      name: blackPlayer.name,
+      rating: blackPlayer.rating || 1500,
+      rd: blackPlayer.rd || 350,
+      vol: blackPlayer.vol || 0.06
     },
     fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
     turn: 'white',
@@ -69,9 +75,11 @@ function createGame(gameData) {
       black: { timer: null, startTime: null }
     },
     opponentAwayCountdown: null,
-    bufferCountdown: 5, // 5 seconds buffer before game starts
+    bufferCountdown: 5,
     bufferTimer: null,
-    gameStartedAt: null
+    gameStartedAt: null,
+    rematchOffer: null,
+    rematchAccepted: false
   };
 
   games.set(gameId, game);

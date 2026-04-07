@@ -1,4 +1,6 @@
 const { games, activePlayers, matchmakingQueue, checkAndFlagTimeout, getEffectiveTimes, getLegalMoves, getGameStatus, validateMove, handlePlayerReconnection, startAbandonmentCountdown, clearAbandonmentTimer, sanitizeGame } = require('./game');
+const { finalizeGame } = require('./utils/game-finisher');
+const config = require('./config');
 
 // Game Heartbeat Timer: Checks for timeouts every 1s
 let lastSyncTime = 0;
@@ -22,6 +24,8 @@ setInterval(() => {
             gameId,
             status: 'aborted',
             termination: 'abandoned',
+            fen: game.fen,
+            turn: game.turn,
             whiteTimeRemainingMs: game.whiteTimeRemainingMs,
             blackTimeRemainingMs: game.blackTimeRemainingMs
           });
@@ -42,6 +46,8 @@ setInterval(() => {
             gameId,
             status: 'aborted',
             termination: 'abandoned',
+            fen: game.fen,
+            turn: game.turn,
             whiteTimeRemainingMs: game.whiteTimeRemainingMs,
             blackTimeRemainingMs: game.blackTimeRemainingMs
           });
@@ -60,12 +66,7 @@ setInterval(() => {
       // 2. Check for timeout
       const wasTimedOut = checkAndFlagTimeout(game);
       if (wasTimedOut) {
-        io.to(gameId).emit('game_ended', {
-          gameId,
-          result: game.result,
-          termination: game.termination,
-          status: 'completed'
-        });
+        finalizeGame(game, io);
         continue;
       }
 
@@ -87,6 +88,7 @@ setInterval(() => {
     lastSyncTime = Date.now();
   }
 }, 1000);
+
 
 function setupSocketHandlers(io) {
   io.on('connection', (socket) => {
@@ -152,12 +154,7 @@ function setupSocketHandlers(io) {
 
       // Check for timeout before processing move
       if (checkAndFlagTimeout(game)) {
-        io.to(gameId).emit('game_ended', {
-          gameId,
-          result: game.result,
-          termination: game.termination,
-          status: 'completed'
-        });
+        finalizeGame(game, io);
         return;
       }
 
@@ -239,14 +236,9 @@ function setupSocketHandlers(io) {
         bufferCountdown: game.bufferCountdown
       });
 
-      // If game ended, also emit game_ended
+      // If game ended, also emit game_ended authoritatively
       if (game.status === 'completed') {
-        io.to(gameId).emit('game_ended', {
-          gameId,
-          result: game.result,
-          termination: game.termination,
-          status: 'completed'
-        });
+        finalizeGame(game, io);
       }
     });
 
@@ -272,12 +264,7 @@ function setupSocketHandlers(io) {
       game.result = playerColor === 'white' ? '0-1' : '1-0';
       game.termination = 'resignation';
 
-      io.to(gameId).emit('game_ended', {
-        gameId,
-        result: game.result,
-        termination: game.termination,
-        status: 'completed'
-      });
+      finalizeGame(game, io);
     });
 
     // Handle draw offer
@@ -328,12 +315,7 @@ function setupSocketHandlers(io) {
         game.result = '1/2-1/2';
         game.termination = 'agreement';
 
-        io.to(gameId).emit('game_ended', {
-          gameId,
-          result: game.result,
-          termination: game.termination,
-          status: 'completed'
-        });
+        finalizeGame(game, io);
       } else {
         // Notify offerer that draw was declined
         const offererSocketId = isWhite ? game.blackPlayer.socketId : game.whitePlayer.socketId;
@@ -361,14 +343,7 @@ function setupSocketHandlers(io) {
       // Check for timeout before syncing
       const timedOut = checkAndFlagTimeout(game);
       if (timedOut) {
-        socket.emit('clock_sync', {
-          whiteTimeRemainingMs: game.whiteTimeRemainingMs,
-          blackTimeRemainingMs: game.blackTimeRemainingMs,
-          serverTimestamp: new Date().toISOString(),
-          gameStatus: 'completed',
-          result: game.result,
-          termination: game.termination,
-        });
+        finalizeGame(game, io);
         return;
       }
 
@@ -377,6 +352,107 @@ function setupSocketHandlers(io) {
         ...times,
         opponentAwayCountdown: game.opponentAwayCountdown
       });
+    });
+
+    // Handle rematch offer
+    socket.on('offer_rematch', (gameId) => {
+      const game = games.get(gameId);
+      if (!game || (game.status !== 'completed' && game.status !== 'aborted')) {
+        socket.emit('error', 'Game not finished');
+        return;
+      }
+
+      const isWhite = game.whitePlayer.userId === socket.userId;
+      const isBlack = game.blackPlayer.userId === socket.userId;
+      if (!isWhite && !isBlack) {
+        socket.emit('error', 'Not authorized');
+        return;
+      }
+
+      game.rematchOffer = socket.userId;
+      const opponentSocketId = isWhite ? game.blackPlayer.socketId : game.whitePlayer.socketId;
+      
+      if (opponentSocketId) {
+        io.to(opponentSocketId).emit('rematch_offered', {
+          gameId,
+          offeredBy: socket.userId
+        });
+      }
+    });
+
+    // Handle rematch acceptance
+    socket.on('accept_rematch', async (gameId) => {
+      const game = games.get(gameId);
+      if (!game || !game.rematchOffer || game.rematchAccepted) {
+        socket.emit('error', 'No rematch offer found');
+        return;
+      }
+
+      if (game.rematchOffer === socket.userId) {
+        socket.emit('error', 'Cannot accept your own offer');
+        return;
+      }
+
+      const isWhite = game.whitePlayer.userId === socket.userId;
+      const isBlack = game.blackPlayer.userId === socket.userId;
+      if (!isWhite && !isBlack) {
+        socket.emit('error', 'Not authorized');
+        return;
+      }
+
+      game.rematchAccepted = true;
+
+      // Swapped colors for rematch
+      const whitePlayer = isWhite ? game.blackPlayer : game.whitePlayer;
+      const blackPlayer = isWhite ? game.whitePlayer : game.blackPlayer;
+
+      try {
+        // Create new game in Laravel backend
+        const response = await fetch(`${config.API_BASE_URL}/api/internal/game/create`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Internal-Secret': config.INTERNAL_SECRET
+          },
+          body: JSON.stringify({
+            white_id: whitePlayer.userId,
+            black_id: blackPlayer.userId,
+            time_control: game.timeControl
+          })
+        });
+
+        if (!response.ok) {
+          const err = await response.text();
+          throw new Error(`Laravel error: ${err}`);
+        }
+
+        const data = await response.json();
+        const newGameId = data.game_id;
+
+        // Broadcast to both players
+        io.to(gameId).emit('rematch_accepted', {
+          oldGameId: gameId,
+          newGameId: newGameId
+        });
+      } catch (err) {
+        console.error('[Rematch] Failed to create new game:', err);
+        socket.emit('error', 'Failed to create rematch game');
+        game.rematchAccepted = false;
+      }
+    });
+
+    // Handle rematch declined
+    socket.on('decline_rematch', (gameId) => {
+      const game = games.get(gameId);
+      if (!game || !game.rematchOffer) return;
+
+      const isWhite = game.whitePlayer.userId === socket.userId;
+      const opponentSocketId = isWhite ? game.blackPlayer.socketId : game.whitePlayer.socketId;
+
+      if (opponentSocketId) {
+        io.to(opponentSocketId).emit('rematch_declined', { gameId });
+      }
+      game.rematchOffer = null;
     });
 
     // Handle disconnect

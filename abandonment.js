@@ -1,3 +1,5 @@
+const { finalizeGame } = require('./utils/game-finisher');
+
 // Helper function to start abandonment countdown for a player
 function startAbandonmentCountdown(game, color, io) {
   const player = color === 'white' ? game.whitePlayer : game.blackPlayer;
@@ -32,12 +34,7 @@ function startAbandonmentCountdown(game, color, io) {
         game.status = 'completed';
         game.result = null;
         game.termination = 'aborted';
-        io.to(game.id).emit('game_ended', {
-          gameId: game.id,
-          result: null,
-          termination: 'aborted',
-          status: 'completed'
-        });
+        finalizeGame(game, io);
       } else {
         abandonGame(game, color, io);
       }
@@ -63,13 +60,7 @@ function abandonGame(game, abandonedBy, io) {
   game.result = abandonedBy === 'white' ? '0-1' : '1-0';
   game.termination = 'abandoned';
 
-  // Notify both players if they're connected
-  io.to(game.id).emit('game_ended', {
-    gameId: game.id,
-    result: game.result,
-    termination: game.termination,
-    status: 'completed'
-  });
+  finalizeGame(game, io);
 }
 
 // Helper function to handle player reconnection

@@ -1,5 +1,6 @@
 const { updateRatings } = require('./rating');
 const config = require('../config');
+const { arenas } = require('../arena');
 
 /**
  * Authoritatively calculates and reports game end to Laravel
@@ -52,6 +53,7 @@ async function finalizeGame(game, io) {
       result: game.result,
       termination: game.termination,
       moves: game.moves,
+      arena_id: game.arenaId || null,
       ...(ratingData || {})
     };
 
@@ -82,6 +84,19 @@ async function finalizeGame(game, io) {
     status: game.status,
     rating_change: ratingData ? ratingData.rating_changes : null
   });
+
+  // Arena-specific processing
+  if (game.arenaId) {
+    const arena = arenas.get(game.arenaId);
+    if (arena) {
+      // Find winnerId if not a draw
+      let winnerId = null;
+      if (game.result === '1-0') winnerId = game.whitePlayer.userId;
+      else if (game.result === '0-1') winnerId = game.blackPlayer.userId;
+      
+      arena.handleGameEnd(game.id, game.result, winnerId);
+    }
+  }
   
   // Cleanup game from memory after a short delay (e.g. 1 minute)
   // to allow players to see the result and chat if needed.

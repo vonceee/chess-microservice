@@ -70,6 +70,7 @@ function createGame(gameData) {
     termination: null,
     createdAt: new Date(),
     lastMoveTimestamp: null,
+    arenaId: gameData.arenaId || null,
     abandonmentTimers: {
       white: { timer: null, startTime: null },
       black: { timer: null, startTime: null }

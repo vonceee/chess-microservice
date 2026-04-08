@@ -1,6 +1,7 @@
 const { games, activePlayers, matchmakingQueue, checkAndFlagTimeout, getEffectiveTimes, getLegalMoves, getGameStatus, validateMove, handlePlayerReconnection, startAbandonmentCountdown, clearAbandonmentTimer, sanitizeGame } = require('./game');
 const { finalizeGame } = require('./utils/game-finisher');
 const config = require('./config');
+const { arenas, Arena, setIo } = require('./arena');
 
 // Game Heartbeat Timer: Checks for timeouts every 1s
 let lastSyncTime = 0;
@@ -91,6 +92,7 @@ setInterval(() => {
 
 
 function setupSocketHandlers(io) {
+  setIo(io);
   io.on('connection', (socket) => {
     // Handle join game
     socket.on('join_game', (gameId) => {
@@ -455,6 +457,99 @@ function setupSocketHandlers(io) {
       game.rematchOffer = null;
     });
 
+    socket.on('join_arena', async (dataFromClient) => {
+      const { arenaId, name, rating } = dataFromClient;
+      if (!arenaId) return;
+
+      let arena = arenas.get(arenaId);
+      
+      if (!arena) {
+        try {
+          const dt = await fetch(`${config.API_BASE_URL}/api/tournaments/${arenaId}`);
+          if (!dt.ok) throw new Error('Failed to load arena from backend');
+          const responseJson = await dt.json();
+          const data = responseJson.data || responseJson;
+          
+          let durationMinutes = 60;
+          let timeControl = data.timeControl || '3+0';
+
+          // data.schedule might contain [{ durationMinutes: 60 }]
+          if (data.schedule && data.schedule.length > 0 && data.schedule[0].durationMinutes) {
+            durationMinutes = data.schedule[0].durationMinutes;
+          }
+
+          let initialTimeMs = 180000;
+          let incrementMs = 0;
+          if (timeControl) {
+            const parts = timeControl.split('+');
+            if (parts.length >= 1) initialTimeMs = parseInt(parts[0]) * 1000;
+            if (parts.length >= 2) incrementMs = parseInt(parts[1]) * 1000;
+          }
+
+          arena = new Arena(arenaId, {
+            timeControl: timeControl,
+            durationMinutes: durationMinutes,
+            initialTimeMs: initialTimeMs,
+            incrementMs: incrementMs
+          });
+          arenas.set(arenaId, arena);
+        } catch (err) {
+          console.error('[Arena] Failed to fetch arena config:', err);
+          socket.emit('error', 'Failed to fetch arena details');
+          return;
+        }
+      }
+
+      socket.join(`arena:${arenaId}`);
+      arena.join({
+        userId: socket.userId,
+        name: name || 'Guest',
+        rating: rating || 1500
+      }, false); // wait=false: Don't join waiting list yet
+
+      // Acknowledge joining with endTime
+      socket.emit('arena_joined', {
+        arenaId,
+        endTime: arena.endTime,
+        isWaiting: false
+      });
+
+      // Send initial leaderboard
+      arena.broadcastLeaderboard();
+      
+      console.log(`[Arena] User ${socket.userId} joined arena lobby ${arenaId}`);
+    });
+
+    socket.on('start_pairing', (arenaId) => {
+      const arena = arenas.get(arenaId);
+      if (arena) {
+        arena.join({ userId: socket.userId }, true); // join waiting list
+        socket.emit('pairing_started', { arenaId });
+        arena.broadcastLeaderboard();
+        console.log(`[Arena] User ${socket.userId} entered waiting list for arena ${arenaId}`);
+      }
+    });
+
+    socket.on('stop_pairing', (arenaId) => {
+      const arena = arenas.get(arenaId);
+      if (arena) {
+        arena.leave(socket.userId);
+        socket.emit('pairing_stopped', { arenaId });
+        arena.broadcastLeaderboard();
+        console.log(`[Arena] User ${socket.userId} left waiting list for arena ${arenaId}`);
+      }
+    });
+
+    socket.on('leave_arena', (arenaId) => {
+      const arena = arenas.get(arenaId);
+      if (arena) {
+        arena.leave(socket.userId);
+        socket.leave(`arena:${arenaId}`);
+        console.log(`[Arena] User ${socket.userId} left arena ${arenaId}`);
+      }
+    });
+    // ----------------------
+
     // Handle disconnect
     socket.on('disconnect', () => {
       // Remove from matchmaking queue
@@ -466,6 +561,11 @@ function setupSocketHandlers(io) {
 
       // Remove from active players
       activePlayers.delete(socket.userId);
+
+      // Remove from all arena waiting rooms
+      for (const arena of arenas.values()) {
+        arena.leave(socket.userId);
+      }
 
       // Handle game abandonment countdown
       for (const [gameId, game] of games) {

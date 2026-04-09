@@ -6,8 +6,11 @@
 const TAU = 0.5;
 const DEFAULT_RD = 350;
 const DEFAULT_VOL = 0.06;
-const MIN_RD = 30;
-const MAX_RD = 350;
+const MIN_RD = 45;
+const MAX_RD = 500;
+const MIN_RATING = 400;
+const MAX_RATING = 4000;
+const PROVISIONAL_RD = 80; // Show "?" when RD > 80
 
 /**
  * G-function for Glicko-2
@@ -83,7 +86,12 @@ function calculateNewVolatility(vol, rating, rd, opponentRating, opponentRd, sco
 
 /**
  * Update player ratings after a single game
- * @returns {Object} { player1: {rating, rd, vol, change}, player2: {rating, rd, vol, change} }
+ * 
+ * Note: Rating changes are designed to be roughly balanced (winner's gain ≈ loser's loss)
+ * but won't be exactly equal due to different RD values affecting each player's update.
+ * This is mathematically correct for Glicko-2.
+ * 
+ * @returns {Object} { p1: {rating, rd, vol, change}, p2: {rating, rd, vol, change} }
  */
 function updateRatings(p1, p2, score) {
   // score is from p1 perspective (1=win, 0.5=draw, 0=loss)
@@ -107,13 +115,13 @@ function updateRatings(p1, p2, score) {
 
   return {
     p1: {
-      rating: Math.round(p1.rating + p1Change),
+      rating: Math.max(MIN_RATING, Math.min(MAX_RATING, Math.round(p1.rating + p1Change))),
       rd: Math.max(MIN_RD, Math.min(MAX_RD, Math.round(p1NewRd))),
       vol: p1NewVol,
       change: Math.round(p1Change)
     },
     p2: {
-      rating: Math.round(p2.rating + p2Change),
+      rating: Math.max(MIN_RATING, Math.min(MAX_RATING, Math.round(p2.rating + p2Change))),
       rd: Math.max(MIN_RD, Math.min(MAX_RD, Math.round(p2NewRd))),
       vol: p2NewVol,
       change: Math.round(p2Change)

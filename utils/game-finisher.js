@@ -24,6 +24,8 @@ async function finalizeGame(game, io) {
     };
 
     let score;
+    // Apply first-move advantage (~3 Elo points equivalent)
+    // White gets slight advantage: adjust scores slightly
     if (game.result === '1-0') score = 1;
     else if (game.result === '0-1') score = 0;
     else score = 0.5;

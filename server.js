@@ -9,6 +9,7 @@ const { games, activePlayers, matchmakingQueue, startBufferCountdown } = require
 const { socketAuth } = require('./auth');
 const { setupSocketHandlers } = require('./handlers');
 const routes = require('./routes');
+const { initTvDirector } = require('./tv');
 
 const app = express();
 const server = http.createServer(app);
@@ -35,6 +36,9 @@ socketAuth(io);
 
 // Initialize socket handlers
 setupSocketHandlers(io);
+
+// Initialize TV director
+initTvDirector(io);
 // Use routes
 app.use('/api', routes);
 

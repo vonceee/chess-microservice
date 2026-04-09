@@ -2,6 +2,7 @@ const { games, activePlayers, matchmakingQueue, checkAndFlagTimeout, getEffectiv
 const { finalizeGame } = require('./utils/game-finisher');
 const config = require('./config');
 const { arenas, Arena, setIo } = require('./arena');
+const { getFeaturedGamesData, getFeaturedGameIds, featuredGames } = require('./tv');
 
 // Game Heartbeat Timer: Checks for timeouts every 1s
 let lastSyncTime = 0;
@@ -94,6 +95,16 @@ setInterval(() => {
 function setupSocketHandlers(io) {
   setIo(io);
   io.on('connection', (socket) => {
+    // Handle join TV
+    socket.on('join_tv', () => {
+      socket.join('tv_global');
+      socket.emit('tv_state', getFeaturedGamesData());
+    });
+
+    socket.on('leave_tv', () => {
+      socket.leave('tv_global');
+    });
+
     // Handle join game
     socket.on('join_game', (gameId) => {
       const game = games.get(gameId);
@@ -237,6 +248,31 @@ function setupSocketHandlers(io) {
         opponentAwayCountdown: game.opponentAwayCountdown,
         bufferCountdown: game.bufferCountdown
       });
+
+      // Broadcast to TV if this is a featured game
+      if (getFeaturedGameIds().includes(gameId)) {
+        let category = null;
+        if (featuredGames.bullet === gameId) category = 'bullet';
+        else if (featuredGames.blitz === gameId) category = 'blitz';
+        else if (featuredGames.rapid === gameId) category = 'rapid';
+
+        if (category) {
+          io.to('tv_global').emit('tv_move', {
+            category,
+            gameId,
+            move: uciMove,
+            san: moveResult.san,
+            fen: game.fen,
+            turn: game.turn,
+            whiteTimeRemainingMs: game.whiteTimeRemainingMs,
+            blackTimeRemainingMs: game.blackTimeRemainingMs,
+            serverTimestamp: game.lastMoveTimestamp.toISOString(),
+            status: game.status,
+            result: game.result,
+            termination: game.termination
+          });
+        }
+      }
 
       // If game ended, also emit game_ended authoritatively
       if (game.status === 'completed') {

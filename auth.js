@@ -16,20 +16,21 @@ function socketAuth(io) {
       });
 
       if (!token && !providedUserId) {
-        return next(new Error('Authentication error'));
-      }
-
-      // For now, use provided credentials directly (token validation can be added later)
-      // This works because the frontend provides userId and userName from authenticated session
-      if (providedUserId) {
+        // Allow anonymous users (for TV spectators)
+        socket.userId = 'guest_' + Math.random().toString(36).substring(7);
+        socket.userName = 'Guest';
+      } else if (providedUserId) {
+        // For now, use provided credentials directly (token validation can be added later)
+        // This works because the frontend provides userId and userName from authenticated session
         socket.userId = String(providedUserId);
         socket.userName = providedUserName || 'Anonymous';
-      } else {
-        return next(new Error('Authentication error: no userId provided'));
       }
 
-      // Store active player
-      activePlayers.set(socket.userId, socket.id);
+      if (socket.userId && !socket.userId.startsWith('guest_')) {
+        // Store active player
+        activePlayers.set(socket.userId, socket.id);
+      }
+      
       next();
     } catch (err) {
       console.log('Authentication error:', err.message);

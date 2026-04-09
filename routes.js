@@ -3,6 +3,7 @@ const router = express.Router();
 
 // Import game state and functions from game.js
 const { games, activePlayers, checkAndFlagTimeout, getEffectiveTimes, getLegalMoves, getGameStatus, validateMove, createGame } = require('./game');
+const { finalizeGame } = require('./utils/game-finisher');
 
 // Health check endpoint
 router.get('/health', (req, res) => {
@@ -194,17 +195,10 @@ router.post('/resign', express.json(), (req, res) => {
   game.result = playerColor === 'white' ? '0-1' : '1-0';
   game.termination = 'resignation';
 
-  // --- ADDED BROADCAST ---
+  // Get io and use finalizeGame to calculate ratings and broadcast with rating_change
   const server = require('./server');
   const io = server.io;
-  if (io) {
-    io.to(gameId).emit('game_ended', {
-      gameId,
-      result: game.result,
-      termination: 'resignation',
-      status: 'completed'
-    });
-  }
+  finalizeGame(game, io);
 
   res.json({
     message: 'You resigned',
@@ -236,10 +230,11 @@ router.post('/draw', express.json(), (req, res) => {
 
   const playerColor = isWhite ? 'white' : 'black';
 
+  // Get io for broadcasting
+  const server = require('./server');
+  const io = server.io;
+
   if (action === 'offer') {
-    // --- ADDED BROADCAST ---
-    const server = require('./server');
-    const io = server.io;
     if (io) {
       io.to(gameId).emit('draw_offered', {
         gameId,
@@ -259,17 +254,7 @@ router.post('/draw', express.json(), (req, res) => {
     game.result = '1/2-1/2';
     game.termination = 'agreement';
 
-    // --- ADDED BROADCAST ---
-    const server = require('./server');
-    const io = server.io;
-    if (io) {
-      io.to(gameId).emit('game_ended', {
-        gameId,
-        result: '1/2-1/2',
-        termination: 'agreement',
-        status: 'completed'
-      });
-    }
+    finalizeGame(game, io);
 
     return res.json({
       message: 'Draw accepted',

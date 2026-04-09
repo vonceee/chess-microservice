@@ -395,20 +395,32 @@ function setupSocketHandlers(io) {
     // Handle rematch offer
     socket.on('offer_rematch', (gameId) => {
       const game = games.get(gameId);
-      if (!game || (game.status !== 'completed' && game.status !== 'aborted')) {
+      if (!game) {
+        socket.emit('error', 'Game not found');
+        return;
+      }
+      if (game.status !== 'completed' && game.status !== 'aborted') {
         socket.emit('error', 'Game not finished');
         return;
       }
 
-      const isWhite = game.whitePlayer.userId === socket.userId;
-      const isBlack = game.blackPlayer.userId === socket.userId;
+      // Convert to numbers for comparison (game stores numbers, socket sends strings)
+      const socketUserIdNum = Number(socket.userId);
+      const isWhite = Number(game.whitePlayer.userId) === socketUserIdNum;
+      const isBlack = Number(game.blackPlayer.userId) === socketUserIdNum;
       if (!isWhite && !isBlack) {
         socket.emit('error', 'Not authorized');
         return;
       }
 
       game.rematchOffer = socket.userId;
-      const opponentSocketId = isWhite ? game.blackPlayer.socketId : game.whitePlayer.socketId;
+      
+      // Try game room first, fall back to activePlayers
+      let opponentSocketId = isWhite ? game.blackPlayer.socketId : game.whitePlayer.socketId;
+      if (!opponentSocketId) {
+        const opponentUserId = isWhite ? game.blackPlayer.userId : game.whitePlayer.userId;
+        opponentSocketId = activePlayers.get(String(opponentUserId));
+      }
       
       if (opponentSocketId) {
         io.to(opponentSocketId).emit('rematch_offered', {
@@ -426,13 +438,15 @@ function setupSocketHandlers(io) {
         return;
       }
 
-      if (game.rematchOffer === socket.userId) {
+      // Convert to numbers for comparison
+      const socketUserIdNum = Number(socket.userId);
+      if (Number(game.rematchOffer) === socketUserIdNum) {
         socket.emit('error', 'Cannot accept your own offer');
         return;
       }
 
-      const isWhite = game.whitePlayer.userId === socket.userId;
-      const isBlack = game.blackPlayer.userId === socket.userId;
+      const isWhite = Number(game.whitePlayer.userId) === socketUserIdNum;
+      const isBlack = Number(game.blackPlayer.userId) === socketUserIdNum;
       if (!isWhite && !isBlack) {
         socket.emit('error', 'Not authorized');
         return;
@@ -467,11 +481,22 @@ function setupSocketHandlers(io) {
         const data = await response.json();
         const newGameId = data.game_id;
 
-        // Broadcast to both players
-        io.to(gameId).emit('rematch_accepted', {
-          oldGameId: gameId,
-          newGameId: newGameId
-        });
+        // Broadcast to both players directly via their socket IDs
+        const whiteSocketId = activePlayers.get(String(whitePlayer.userId));
+        const blackSocketId = activePlayers.get(String(blackPlayer.userId));
+        
+        if (whiteSocketId) {
+          io.to(whiteSocketId).emit('rematch_accepted', {
+            oldGameId: gameId,
+            newGameId: newGameId
+          });
+        }
+        if (blackSocketId) {
+          io.to(blackSocketId).emit('rematch_accepted', {
+            oldGameId: gameId,
+            newGameId: newGameId
+          });
+        }
       } catch (err) {
         console.error('[Rematch] Failed to create new game:', err);
         socket.emit('error', 'Failed to create rematch game');
@@ -484,8 +509,15 @@ function setupSocketHandlers(io) {
       const game = games.get(gameId);
       if (!game || !game.rematchOffer) return;
 
-      const isWhite = game.whitePlayer.userId === socket.userId;
-      const opponentSocketId = isWhite ? game.blackPlayer.socketId : game.whitePlayer.socketId;
+      const socketUserIdNum = Number(socket.userId);
+      const isWhite = Number(game.whitePlayer.userId) === socketUserIdNum;
+      
+      // Try game room first, fall back to activePlayers
+      let opponentSocketId = isWhite ? game.blackPlayer.socketId : game.whitePlayer.socketId;
+      if (!opponentSocketId) {
+        const opponentUserId = isWhite ? game.blackPlayer.userId : game.whitePlayer.userId;
+        opponentSocketId = activePlayers.get(String(opponentUserId));
+      }
 
       if (opponentSocketId) {
         io.to(opponentSocketId).emit('rematch_declined', { gameId });

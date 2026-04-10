@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 
 // Import modular components
 const config = require('./config');
-const { games, activePlayers, matchmakingQueue, startBufferCountdown } = require('./game');
+const { games, activePlayers, matchmakingQueue } = require('./game');
 const { socketAuth } = require('./auth');
 const { setupSocketHandlers } = require('./handlers');
 const routes = require('./routes');
@@ -48,11 +48,6 @@ function cleanupTimers() {
   for (const [gameId, game] of games) {
     clearAbandonmentTimer(game, 'white');
     clearAbandonmentTimer(game, 'black');
-    // Clear buffer timer
-    if (game.bufferTimer) {
-      clearInterval(game.bufferTimer);
-      game.bufferTimer = null;
-    }
   }
 }
 

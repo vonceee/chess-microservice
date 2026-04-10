@@ -1,6 +1,7 @@
 // Game state management
 const { Chess } = require('chess.js');
-const { validateMove, getGameStatus, getLegalMoves, checkAndFlagTimeout, getEffectiveTimes, sanitizeGame } = require('./utils');
+const { validateMove, getGameStatus, getLegalMoves } = require('./utils/chess');
+const { checkAndFlagTimeout, getEffectiveTimes, sanitizeGame } = require('./utils/clock');
 const { startAbandonmentCountdown, clearAbandonmentTimer, handlePlayerReconnection } = require('./abandonment');
 
 // In-memory storage
@@ -31,8 +32,6 @@ const matchmakingQueue = []; // Queue for matchmaking
 //     black: { timer: Timeout | null, startTime: Date | null }
 //   },
 //   opponentAwayCountdown: number | null,
-//   bufferCountdown: number | null,
-//   bufferTimer: Timeout | null,
 //   gameStartedAt: Date | null
 // }
 
@@ -76,46 +75,18 @@ function createGame(gameData) {
       black: { timer: null, startTime: null }
     },
     opponentAwayCountdown: null,
-    bufferCountdown: 5,
-    bufferTimer: null,
-    gameStartedAt: null,
+    gameStartedAt: new Date(),
+    lastMoveTimestamp: new Date(),
+    turnStartedAt: new Date(),
     rematchOffer: null,
     rematchAccepted: false
   };
 
   games.set(gameId, game);
 
-  // Start buffer countdown for the new game
-  startBufferCountdown(game);
-
   return game;
 }
 
-// Helper function to start buffer countdown for new games
-function startBufferCountdown(game) {
-  game.bufferCountdown = 5;
-  game.gameStartedAt = null;
-
-  game.bufferTimer = setInterval(() => {
-    game.bufferCountdown--;
-
-    // Notify both players of buffer countdown
-    // Note: io is not available here, this will be handled in server.js
-
-    // When buffer reaches 0, start the actual game
-    if (game.bufferCountdown <= 0) {
-      clearInterval(game.bufferTimer);
-      game.bufferTimer = null;
-      game.bufferCountdown = null;
-      game.gameStartedAt = new Date();
-      game.lastMoveTimestamp = game.gameStartedAt;
-      game.turnStartedAt = game.gameStartedAt;
-
-      // Notify players that game has started
-      // Note: io notification will be handled in server.js
-    }
-  }, 1000);
-}
 
 function getGame(gameId) {
   return games.get(gameId);
@@ -160,7 +131,6 @@ module.exports = {
   addActivePlayer,
   removeActivePlayer,
   getActivePlayerSocket,
-  startBufferCountdown,
   games,
   activePlayers,
   matchmakingQueue,

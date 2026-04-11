@@ -7,6 +7,8 @@ const { arenas } = require('../arena');
  */
 async function finalizeGame(game, io) {
   if (game.status !== 'completed' && game.status !== 'aborted') return;
+  if (game.isFinalizing) return;
+  game.isFinalizing = true;
 
   const games = require('../game').games;
   let ratingData = null;
@@ -29,6 +31,7 @@ async function finalizeGame(game, io) {
     if (game.result === '1-0') score = 1;
     else if (game.result === '0-1') score = 0;
     else score = 0.5;
+
 
     try {
         const result = updateRatings(p1, p2, score);
@@ -59,6 +62,7 @@ async function finalizeGame(game, io) {
       ...(ratingData || {})
     };
 
+
     const response = await fetch(`${config.API_BASE_URL}/api/internal/game/${game.id}/complete`, {
       method: 'POST',
       headers: { 
@@ -71,8 +75,6 @@ async function finalizeGame(game, io) {
     if (!response.ok) {
        const body = await response.text();
        console.error(`[Microservice] Failed to report game end to Laravel: ${response.status} - ${body}`);
-    } else {
-       console.log(`[Microservice] Successfully reported game end to Laravel for game ${game.id}`);
     }
   } catch (error) {
     console.error('[Microservice] Error reporting game end to Laravel:', error);
@@ -104,7 +106,6 @@ async function finalizeGame(game, io) {
   // to allow players to see the result and chat if needed.
   setTimeout(() => {
     games.delete(game.id);
-    console.log(`[Microservice] Cleaned up game ${game.id}`);
   }, 60000);
 }
 

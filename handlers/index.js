@@ -1,6 +1,7 @@
 const { setupGameHandlers } = require('./game.handler');
 const { setupArenaHandlers } = require('./arena.handler');
 const { setupTvHandlers } = require('./tv.handler');
+const { setupStudyHandlers } = require('./study.handler');
 const { setIo } = require('../arena');
 const { games, activePlayers, matchmakingQueue, checkAndFlagTimeout, handlePlayerReconnection, startAbandonmentCountdown } = require('../game');
 const { finalizeGame } = require('../utils/game-finisher');
@@ -77,6 +78,7 @@ function setupSocketHandlers(io) {
     setupGameHandlers(socket, io);
     setupArenaHandlers(socket, io);
     setupTvHandlers(socket, io);
+    setupStudyHandlers(socket, io);
 
     // Global disconnection handler
     socket.on('disconnect', () => {

@@ -1,5 +1,6 @@
 const { arenas, Arena } = require('../arena');
 const config = require('../config');
+const pendingInitializations = new Map(); // arenaId -> Promise
 
 function setupArenaHandlers(socket, io) {
   socket.on('join_arena', async (dataFromClient) => {
@@ -9,41 +10,66 @@ function setupArenaHandlers(socket, io) {
     let arena = arenas.get(arenaId);
     
     if (!arena) {
-      try {
-        const dt = await fetch(`${config.API_BASE_URL}/api/tournaments/${arenaId}`);
-        if (!dt.ok) throw new Error('Backend error');
-        const responseJson = await dt.json();
-        const data = responseJson.data || responseJson;
-        
-        let durationMinutes = 60;
-        let timeControl = data.timeControl || '3+0';
+      // Check if already being initialized
+      if (pendingInitializations.has(arenaId)) {
+        await pendingInitializations.get(arenaId);
+        arena = arenas.get(arenaId);
+      } else {
+        const initPromise = (async () => {
+          try {
+            const dt = await fetch(`${config.API_BASE_URL}/api/arenas/${arenaId}`);
+            if (!dt.ok) throw new Error('Backend error');
+            const responseJson = await dt.json();
+            const data = responseJson.data || responseJson;
+            
+            let durationMinutes = data.durationMinutes || 60;
+            let timeControl = data.timeControl || '3+0';
 
-        if (data.schedule && data.schedule.length > 0 && data.schedule[0].durationMinutes) {
-          durationMinutes = data.schedule[0].durationMinutes;
+            let initialTimeMs = 180000;
+            let incrementMs = 0;
+            if (timeControl) {
+              const parts = timeControl.split('+');
+              if (parts.length >= 1) initialTimeMs = parseInt(parts[0]) * 1000;
+              if (parts.length >= 2) incrementMs = parseInt(parts[1]) * 1000;
+            }
+
+            const newArena = new Arena(arenaId, {
+              timeControl, 
+              durationMinutes, 
+              initialTimeMs, 
+              incrementMs,
+              startsAt: data.start_date
+            });
+            arenas.set(arenaId, newArena);
+          } catch (err) {
+            console.error('[Arena] Fetch error:', err);
+            socket.emit('error', 'Failed to fetch arena details');
+            throw err;
+          } finally {
+            pendingInitializations.delete(arenaId);
+          }
+        })();
+
+        pendingInitializations.set(arenaId, initPromise);
+        try {
+          await initPromise;
+          arena = arenas.get(arenaId);
+        } catch (err) {
+          return;
         }
-
-        let initialTimeMs = 180000;
-        let incrementMs = 0;
-        if (timeControl) {
-          const parts = timeControl.split('+');
-          if (parts.length >= 1) initialTimeMs = parseInt(parts[0]) * 1000;
-          if (parts.length >= 2) incrementMs = parseInt(parts[1]) * 1000;
-        }
-
-        arena = new Arena(arenaId, {
-          timeControl, durationMinutes, initialTimeMs, incrementMs
-        });
-        arenas.set(arenaId, arena);
-      } catch (err) {
-        console.error('[Arena] Fetch error:', err);
-        socket.emit('error', 'Failed to fetch arena details');
-        return;
       }
     }
 
     socket.join(`arena:${arenaId}`);
     arena.join({ userId: socket.userId, name: name || 'Guest', rating: rating || 1500 }, false);
-    socket.emit('arena_joined', { arenaId, endTime: arena.endTime, isWaiting: false });
+    socket.emit('arena_joined', { 
+      arenaId, 
+      startTime: arena.startTime,
+      endTime: arena.endTime, 
+      isWaiting: arena.waitingRoom.has(socket.userId),
+      status: arena.getStatus(),
+      winner: arena.getWinner()
+    });
     arena.broadcastLeaderboard();
   });
 

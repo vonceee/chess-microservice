@@ -39,8 +39,16 @@ setupSocketHandlers(io);
 
 // Initialize TV director
 initTvDirector(io);
-// Use routes
+
+// Basic routes
+app.get('/ping', (req, res) => res.json({ timestamp: new Date().toISOString() }));
+app.get('/health', (req, res) => res.json({ status: 'ok', activeGames: games.size }));
+
+// API routes prefix
 app.use('/api', routes);
+// Fallback for /api/ping in case frontend uses the prefix
+app.get('/api/ping', (req, res) => res.json({ timestamp: new Date().toISOString() }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', activeGames: games.size }));
 
 // Cleanup function for server shutdown
 function cleanupTimers() {

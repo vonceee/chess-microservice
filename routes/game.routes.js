@@ -14,6 +14,11 @@ router.get('/health', (req, res) => {
   });
 });
 
+// Clock synchronization endpoint
+router.get('/ping', (req, res) => {
+  res.json({ timestamp: new Date().toISOString() });
+});
+
 // Create game
 router.post('/create-game', express.json(), (req, res) => {
   const game = createGame(req.body);
@@ -39,8 +44,8 @@ router.post('/move', express.json(), (req, res) => {
   const game = games.get(gameId);
   if (!game || game.status !== 'active') return res.status(422).json({ message: 'Invalid game' });
 
-  const isWhite = game.whitePlayer.userId === userId;
-  const isBlack = game.blackPlayer.userId === userId;
+  const isWhite = String(game.whitePlayer.userId) === String(userId);
+  const isBlack = String(game.blackPlayer.userId) === String(userId);
   if (!isWhite && !isBlack) return res.status(403).json({ message: 'Not authorized' });
 
   const playerColor = isWhite ? 'white' : 'black';
@@ -57,8 +62,8 @@ router.post('/resign', express.json(), (req, res) => {
   const game = games.get(gameId);
   if (!game || game.status !== 'active') return res.status(422).json({ message: 'Invalid game' });
 
-  const isWhite = game.whitePlayer.userId === userId;
-  const isBlack = game.blackPlayer.userId === userId;
+  const isWhite = String(game.whitePlayer.userId) === String(userId);
+  const isBlack = String(game.blackPlayer.userId) === String(userId);
   if (!isWhite && !isBlack) return res.status(403).json({ message: 'Not authorized' });
 
   const server = require('../server');

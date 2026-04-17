@@ -145,7 +145,7 @@ class Arena {
     }
 
     // Create games for pairs
-    pairs.forEach(async ([p1, p2]) => {
+    for (const [p1, p2] of pairs) {
       this.waitingRoom.delete(p1.userId);
       this.waitingRoom.delete(p2.userId);
 
@@ -200,7 +200,11 @@ class Arena {
             blackId: blackPlayer.userId
         });
       }
-    });
+    }
+
+    if (pairs.length > 0) {
+        this.broadcastLeaderboard();
+    }
   }
 
   async syncToLaravel(endpoint, payload) {
@@ -270,6 +274,26 @@ class Arena {
     this.broadcastLeaderboard();
   }
 
+  getTopGameId() {
+    if (this.activeGames.size === 0) return null;
+
+    // Get leaderboard sorted by score/rating
+    const leaderboard = Array.from(this.participants.values())
+      .sort((a, b) => b.score - a.score || b.rating - a.rating);
+
+    // Find the first player who is in an active game
+    for (const p of leaderboard) {
+      for (const [gameId, players] of this.activeGames.entries()) {
+        if (players.whiteId === p.userId || players.blackId === p.userId) {
+          return gameId;
+        }
+      }
+    }
+
+    // Fallback: return the first active game recorded if no leaderboard match (unlikely)
+    return this.activeGames.keys().next().value || null;
+  }
+
   updatePlayerScore(userId, resultType, opponentId) {
     // If the game ended AFTER the arena ended, don't count the points
     if (Date.now() > this.endTime) {
@@ -312,7 +336,8 @@ class Arena {
 
     io.to(`arena:${this.id}`).emit('arena_leaderboard_update', {
       arenaId: this.id,
-      leaderboard
+      leaderboard,
+      topGameId: this.getTopGameId()
     });
   }
 

@@ -159,10 +159,18 @@ class Arena {
           time_control: this.options.timeControl
         });
 
+        console.log(`[Arena] Syncing match to Laravel: ${p1.name} vs ${p2.name} in arena ${this.id}`);
         // Use a more robust way to call Laravel that doesn't depend on Node 18 fetch
         gameId = await this.syncMatchToLaravel(payload);
+        
+        if (!gameId) {
+            console.error('[Arena] Laravel returned empty gameId, falling back to local ID');
+            gameId = Math.random().toString(36).substring(2, 11);
+        } else {
+            console.log(`[Arena] Registered game ${gameId} in Laravel DB`);
+        }
       } catch (err) {
-        console.error('[Arena] Failed to sync match to Laravel:', err);
+        console.error('[Arena] Failed to sync match to Laravel:', err.message);
         gameId = Math.random().toString(36).substring(2, 11);
       }
       
@@ -185,20 +193,24 @@ class Arena {
         incrementMs: this.options.incrementMs
       };
 
-      const { createGame } = require('./game');
-      const game = createGame(gameData);
-      game.arenaId = this.id;
-      this.activeGames.set(gameId, { whiteId: whitePlayer.userId, blackId: blackPlayer.userId });
+      try {
+        const { createGame } = require('./game');
+        const game = createGame(gameData);
+        game.arenaId = this.id;
+        this.activeGames.set(gameId, { whiteId: whitePlayer.userId, blackId: blackPlayer.userId });
 
-      // Notify players in the arena room
-      if (io) {
-        console.log(`[Arena] Broadcasting match ${gameId} to room arena:${this.id}`);
-        io.to(`arena:${this.id}`).emit('arena_game_matched', { 
-            gameId, 
-            arenaId: this.id,
-            whiteId: whitePlayer.userId,
-            blackId: blackPlayer.userId
-        });
+        // Notify players in the arena room
+        if (io) {
+          console.log(`[Arena] Broadcasting match ${gameId} to room arena:${this.id}`);
+          io.to(`arena:${this.id}`).emit('arena_game_matched', { 
+              gameId, 
+              arenaId: this.id,
+              whiteId: whitePlayer.userId,
+              blackId: blackPlayer.userId
+          });
+        }
+      } catch (gameErr) {
+        console.error(`[Arena] Crisis: Failed to initialize game ${gameId} in memory:`, gameErr);
       }
     }
 

@@ -37,7 +37,13 @@ function handleProcessMove(game, uciMove, playerColor, io) {
 
   game.fen = moveResult.fen;
   game.moves.push(uciMove);
-  game.lastMoveTimestamp = now;
+  // Only start the official game clock (timestamp) after both players have made one move.
+  // This gives both players a grace period for their first move.
+  if (game.moves.length >= 2) {
+    game.lastMoveTimestamp = now;
+  } else {
+    game.lastMoveTimestamp = null;
+  }
   game.turnStartedAt = now; // Mark start of the next player's turn
 
   // Check for game end conditions
@@ -66,7 +72,7 @@ function handleProcessMove(game, uciMove, playerColor, io) {
     turn: game.turn,
     whiteTimeRemainingMs: game.whiteTimeRemainingMs,
     blackTimeRemainingMs: game.blackTimeRemainingMs,
-    serverTimestamp: game.lastMoveTimestamp.toISOString(),
+    serverTimestamp: game.lastMoveTimestamp ? game.lastMoveTimestamp.toISOString() : null,
     status: game.status,
     result: game.result,
     termination: game.termination,

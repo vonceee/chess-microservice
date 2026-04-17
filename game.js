@@ -76,8 +76,8 @@ function createGame(gameData) {
     },
     opponentAwayCountdown: null,
     gameStartedAt: new Date(),
-    lastMoveTimestamp: new Date(),
-    turnStartedAt: new Date(),
+    lastMoveTimestamp: null,
+    turnStartedAt: null,
     rematchOffer: null,
     rematchAccepted: false
   };

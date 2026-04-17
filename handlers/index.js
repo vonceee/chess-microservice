@@ -19,8 +19,19 @@ setInterval(() => {
       const tickNow = new Date();
 
       // Abort logic for inactive starts
+      // First move grace period: Abort if no move within 15s
       if (game.moves.length < 2 && game.turnStartedAt) {
-        if (tickNow - game.turnStartedAt > 30000) {
+        const elapsed = tickNow - game.turnStartedAt;
+        const limitMs = 15000;
+        const remaining = Math.max(0, Math.ceil((limitMs - elapsed) / 1000));
+        
+        // Notify client of remaining time to make first move
+        io.to(gameId).emit('first_move_countdown', { 
+          gameId, 
+          secondsRemaining: remaining 
+        });
+
+        if (elapsed > limitMs) {
           game.status = 'aborted';
           game.termination = 'aborted_server';
           io.to(gameId).emit('game_ended', { 
@@ -41,8 +52,8 @@ setInterval(() => {
         } else {
           game.blackTimeRemainingMs = Math.max(0, game.blackTimeRemainingMs - elapsed);
         }
+        game.lastMoveTimestamp = tickNow;
       }
-      game.lastMoveTimestamp = tickNow;
 
       if (checkAndFlagTimeout(game)) {
         finalizeGame(game, io);
@@ -56,7 +67,7 @@ setInterval(() => {
           whiteTimeRemainingMs: game.whiteTimeRemainingMs,
           blackTimeRemainingMs: game.blackTimeRemainingMs,
           turn: game.turn,
-          serverTimestamp: game.lastMoveTimestamp.toISOString(),
+          serverTimestamp: game.lastMoveTimestamp ? game.lastMoveTimestamp.toISOString() : null,
           opponentAwayCountdown: game.opponentAwayCountdown
         });
       }

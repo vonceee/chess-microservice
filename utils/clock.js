@@ -40,12 +40,12 @@ function getEffectiveTimes(game) {
     };
   }
 
-  // If no moves yet, return initial time
+  // If no moves yet, return initial time and null timestamp
   if (!game.lastMoveTimestamp) {
     return {
       whiteTimeRemainingMs: game.initialTimeMs,
       blackTimeRemainingMs: game.initialTimeMs,
-      serverTimestamp: now.toISOString()
+      serverTimestamp: null
     };
   }
 

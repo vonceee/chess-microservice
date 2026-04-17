@@ -99,7 +99,7 @@ class Arena {
     if (p) p.isWaiting = false;
   }
 
-  pairPlayers() {
+  async pairPlayers() {
     if (this.waitingRoom.size < 2) return;
 
     // Get all waiting players and their data

@@ -42,7 +42,7 @@ function setupArenaHandlers(socket, io) {
             });
             arenas.set(arenaId, newArena);
           } catch (err) {
-            console.error('[Arena] Fetch error:', err);
+            console.error(`[Arena] Fetch error for URL: ${config.API_BASE_URL}/api/arenas/${arenaId}`, err);
             socket.emit('error', 'Failed to fetch arena details');
             throw err;
           } finally {

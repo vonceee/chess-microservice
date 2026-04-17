@@ -209,10 +209,10 @@ class Arena {
 
   async syncToLaravel(endpoint, payload) {
     return new Promise((resolve, reject) => {
-      const http = require('http');
       const url = new URL(`${config.API_BASE_URL}${endpoint}`);
+      const lib = url.protocol === 'https:' ? require('https') : require('http');
       
-      const req = http.request({
+      const req = lib.request({
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
@@ -233,7 +233,7 @@ class Arena {
               resolve({});
             }
           } else {
-            console.error(`[Arena] Laravel Error (${res.statusCode}):`, data);
+            console.error(`[Arena] syncToLaravel FAILED (${res.statusCode}) for ${endpoint}. Body:`, data);
             reject(new Error(`Status: ${res.statusCode}`));
           }
         });

@@ -85,6 +85,9 @@ function setupSocketHandlers(io) {
     // Basic account tracking
     activePlayers.set(socket.userId, socket.id);
 
+    // Notify all clients about user presence
+    io.emit('presence_update', { userId: socket.userId, online: true });
+
     // Wire up modular handlers
     setupGameHandlers(socket, io);
     setupArenaHandlers(socket, io);
@@ -97,8 +100,12 @@ function setupSocketHandlers(io) {
       const qIdx = matchmakingQueue.findIndex(p => p.userId === socket.userId);
       if (qIdx !== -1) matchmakingQueue.splice(qIdx, 1);
 
-      // Remove from active players
-      activePlayers.delete(socket.userId);
+      // Remove from active players only if this is the active socket for the user
+      if (activePlayers.get(socket.userId) === socket.id) {
+        activePlayers.delete(socket.userId);
+        // Notify all clients about user presence
+        io.emit('presence_update', { userId: socket.userId, online: false });
+      }
 
       // Handle abandonment
       for (const [gameId, game] of games) {

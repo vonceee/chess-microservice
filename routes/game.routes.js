@@ -14,6 +14,25 @@ router.get('/health', (req, res) => {
   });
 });
 
+// Single user presence
+router.get('/presence/:userId', (req, res) => {
+  const { userId } = req.params;
+  res.json({ online: activePlayers.has(userId) });
+});
+
+// Bulk user presence
+router.post('/presence/bulk', express.json(), (req, res) => {
+  const { userIds } = req.body;
+  if (!Array.isArray(userIds)) {
+    return res.status(400).json({ message: 'userIds must be an array' });
+  }
+  const statuses = {};
+  for (const id of userIds) {
+    statuses[id] = activePlayers.has(id);
+  }
+  res.json({ statuses });
+});
+
 // Clock synchronization endpoint
 router.get('/ping', (req, res) => {
   res.json({ timestamp: new Date().toISOString() });

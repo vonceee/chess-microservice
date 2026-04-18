@@ -6,8 +6,10 @@ function setupStudyHandlers(socket, io) {
     
     socket.join(studyId);
     
-    // Initialize study state if not present
-    if (!activeStudies.has(studyId)) {
+    const state = activeStudies.get(studyId);
+
+    // Initialize study state if not present OR if ownerId was corrupted as "undefined"
+    if (!state || state.ownerId === 'undefined' || state.ownerId === 'null') {
       activeStudies.set(studyId, {
         ownerId: String(ownerId),
         currentChapterId: initialState?.chapterId || null,
@@ -17,77 +19,115 @@ function setupStudyHandlers(socket, io) {
       });
     }
 
-    const state = activeStudies.get(studyId);
-    socket.emit('study_synced', state);
+    const currentState = activeStudies.get(studyId);
+    socket.emit('study_synced', currentState);
     console.log(`User ${socket.userId} joined study ${studyId}`);
   });
 
   socket.on('study_move', (data) => {
-    const { studyId, move, fen, chapterId } = data;
+    const { studyId, move, fen, chapterId, moves } = data;
     const study = activeStudies.get(studyId);
 
     if (!study) return;
+    if (socket.userId !== study.ownerId) return;
 
-    // Check if user is owner
-    if (socket.userId !== study.ownerId) {
-      console.warn(`Unauthorized move attempt by ${socket.userId} in study ${studyId}`);
-      return;
+    // Trust the full tree sent by the owner
+    if (moves) {
+      study.moves = moves;
     }
 
-    // Update state
     study.fen = fen;
-    study.moves.push(move);
     study.currentChapterId = chapterId;
-    study.shapes = []; // Clear shapes on new move (standard practice)
+    study.shapes = [];
 
-    // Broadcast to all participants in the study
-    io.to(studyId).emit('study_move_made', {
-      move,
-      fen,
-      chapterId,
-      userId: socket.userId
-    });
+    io.to(studyId).emit('study_move_made', { ...data, userId: socket.userId });
+  });
+
+  socket.on('study_delete_node', (data) => {
+    const { studyId, chapterId, nodeId } = data;
+    const study = activeStudies.get(studyId);
+    if (!study || socket.userId !== study.ownerId) return;
+
+    if (findAndDelete(study.moves, nodeId)) {
+      io.to(studyId).emit('study_node_deleted', { chapterId, nodeId });
+    }
+  });
+
+  socket.on('study_update_comment', (data) => {
+    const { studyId, chapterId, nodeId, comment } = data;
+    const study = activeStudies.get(studyId);
+    if (!study || socket.userId !== study.ownerId) return;
+
+    if (findAndUpdateComment(study.moves, nodeId, comment)) {
+      io.to(studyId).emit('study_comment_updated', { chapterId, nodeId, comment });
+    }
   });
 
   socket.on('study_draw_shapes', (data) => {
     const { studyId, shapes } = data;
     const study = activeStudies.get(studyId);
-
-    if (!study) return;
-
-    if (socket.userId !== study.ownerId) return;
+    if (!study || socket.userId !== study.ownerId) return;
 
     study.shapes = shapes;
-
-    io.to(studyId).emit('study_shapes_drawn', {
-      shapes,
-      userId: socket.userId
-    });
+    io.to(studyId).emit('study_shapes_drawn', { shapes, userId: socket.userId });
   });
 
   socket.on('study_change_chapter', (data) => {
     const { studyId, chapterId, fen, moves } = data;
     const study = activeStudies.get(studyId);
-
-    if (!study) return;
-    if (socket.userId !== study.ownerId) return;
+    if (!study || socket.userId !== study.ownerId) return;
 
     study.currentChapterId = chapterId;
     study.fen = fen;
     study.moves = moves;
     study.shapes = [];
 
-    io.to(studyId).emit('study_chapter_changed', {
-      chapterId,
-      fen,
-      moves
-    });
+    io.to(studyId).emit('study_chapter_changed', { chapterId, fen, moves });
   });
 
   socket.on('leave_study', (studyId) => {
     socket.leave(studyId);
-    console.log(`User ${socket.userId} left study ${studyId}`);
   });
+}
+
+function findAndInsertByPath(nodes, path, newNode) {
+  if (path.length === 0) return false;
+  const currentId = path[0];
+
+  const targetNode = nodes.find(n => n.id === currentId);
+  if (!targetNode) return false;
+
+  if (path.length === 1) {
+    if (!targetNode.children) targetNode.children = [];
+    const existing = targetNode.children.find(c => c.san === newNode.san && c.fen === newNode.fen);
+    if (!existing) targetNode.children.push(newNode);
+    return true;
+  }
+
+  return findAndInsertByPath(targetNode.children || [], path.slice(1), newNode);
+}
+
+function findAndDelete(nodes, nodeId) {
+  const index = nodes.findIndex(n => n.id === nodeId);
+  if (index !== -1) {
+    nodes.splice(index, 1);
+    return true;
+  }
+  for (const node of nodes) {
+    if (node.children && findAndDelete(node.children, nodeId)) return true;
+  }
+  return false;
+}
+
+function findAndUpdateComment(nodes, nodeId, comment) {
+  for (const node of nodes) {
+    if (node.id === nodeId) {
+      node.comment = comment;
+      return true;
+    }
+    if (node.children && findAndUpdateComment(node.children, nodeId, comment)) return true;
+  }
+  return false;
 }
 
 module.exports = { setupStudyHandlers };

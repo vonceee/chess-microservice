@@ -44,6 +44,7 @@ function createGame(gameData) {
       userId: whitePlayer.userId,
       socketId: '',
       name: whitePlayer.name,
+      isBot: whitePlayer.isBot || false,
       rating: whitePlayer.rating || 1500,
       rd: whitePlayer.rd || 350,
       vol: whitePlayer.vol || 0.06
@@ -52,6 +53,7 @@ function createGame(gameData) {
       userId: blackPlayer.userId,
       socketId: '',
       name: blackPlayer.name,
+      isBot: blackPlayer.isBot || false,
       rating: blackPlayer.rating || 1500,
       rd: blackPlayer.rd || 350,
       vol: blackPlayer.vol || 0.06

@@ -22,7 +22,7 @@ setInterval(() => {
       // First move grace period: Abort if no move within 15s
       if (game.moves.length < 2 && game.turnStartedAt) {
         const elapsed = tickNow - game.turnStartedAt;
-        const limitMs = 15000;
+        const limitMs = 30000;
         const remaining = Math.max(0, Math.ceil((limitMs - elapsed) / 1000));
         
         // Notify client of remaining time to make first move

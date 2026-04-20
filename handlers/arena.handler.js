@@ -1,5 +1,6 @@
 const { arenas, Arena } = require('../arena');
 const config = require('../config');
+const axios = require('axios');
 const pendingInitializations = new Map(); // arenaId -> Promise
 
 function setupArenaHandlers(socket, io) {
@@ -17,10 +18,8 @@ function setupArenaHandlers(socket, io) {
       } else {
         const initPromise = (async () => {
           try {
-            const dt = await fetch(`${config.API_BASE_URL}/api/arenas/${arenaId}`);
-            if (!dt.ok) throw new Error('Backend error');
-            const responseJson = await dt.json();
-            const data = responseJson.data || responseJson;
+            const response = await axios.get(`${config.API_BASE_URL}/api/arenas/${arenaId}`);
+            const data = response.data.data || response.data;
             
             let durationMinutes = data.durationMinutes || 60;
             let timeControl = data.timeControl || '3+0';
@@ -42,7 +41,7 @@ function setupArenaHandlers(socket, io) {
             });
             arenas.set(arenaId, newArena);
           } catch (err) {
-            console.error(`[Arena] Fetch error for URL: ${config.API_BASE_URL}/api/arenas/${arenaId}`, err);
+            console.error(`[Arena] Fetch error for URL: ${config.API_BASE_URL}/api/arenas/${arenaId}`, err.message);
             socket.emit('error', 'Failed to fetch arena details');
             throw err;
           } finally {

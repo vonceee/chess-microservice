@@ -1,3 +1,4 @@
+const axios = require('axios');
 const { updateRatings } = require('./rating');
 const config = require('../config');
 const { arenas } = require('../arena');
@@ -63,21 +64,24 @@ async function finalizeGame(game, io) {
     };
 
 
-    const response = await fetch(`${config.API_BASE_URL}/api/internal/game/${game.id}/complete`, {
-      method: 'POST',
+    const response = await axios.post(`${config.API_BASE_URL}/api/internal/game/${game.id}/complete`, payload, {
       headers: { 
         'Content-Type': 'application/json',
         'X-Internal-Secret': config.INTERNAL_SECRET
       },
-      body: JSON.stringify(payload)
+      timeout: 10000 // 10s safety timeout for production
     });
 
-    if (!response.ok) {
-       const body = await response.text();
-       console.error(`[Microservice] Failed to report game end to Laravel: ${response.status} - ${body}`);
+    if (response.data.success) {
+      console.log(`[Microservice] Game ${game.id} successfully reported to Laravel.`);
+    } else {
+      console.warn(`[Microservice] Laravel rejected game report for ${game.id}:`, response.data);
     }
   } catch (error) {
-    console.error('[Microservice] Error reporting game end to Laravel:', error);
+    const errorMsg = error.response ? 
+      `Server responded with ${error.response.status}: ${JSON.stringify(error.response.data)}` : 
+      error.message;
+    console.error(`[Microservice] Fatal error reporting game ${game.id} to Laravel: ${errorMsg}`);
   }
 
   // Broadcast to players with specific rating info

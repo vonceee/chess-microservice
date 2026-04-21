@@ -19,8 +19,8 @@ class BotEngineService {
         this.isInitializing = true;
         this.initPromise = new Promise(async (resolve, reject) => {
             try {
-                console.log('[BotEngine] Initializing persistent engine...');
-                const engine = await stockfish('single');
+                console.log('[BotEngine] Initializing persistent engine (lite-single)...');
+                const engine = await stockfish('lite-single');
                 
                 // Unified standard output listener
                 engine.listener = (line) => {
@@ -81,6 +81,7 @@ class BotEngineService {
             console.log(`[BotEngine] Calculating move for FEN: ${fen}`);
             engine.sendCommand('uci');
             engine.sendCommand(`setoption name Skill Level value ${level}`);
+            engine.sendCommand('setoption name Hash value 16');
             engine.sendCommand('ucinewgame');
             engine.sendCommand(`position fen ${fen}`);
             

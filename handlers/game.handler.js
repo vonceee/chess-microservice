@@ -143,6 +143,19 @@ function setupGameHandlers(socket, io) {
     });
   });
 
+  // Handle draw offer cancellation
+  socket.on('cancel_draw_offer', (gameId) => {
+    const game = games.get(gameId);
+    if (!game || game.status !== 'active') return;
+
+    const isWhite = String(game.whitePlayer.userId) === String(socket.userId);
+    const isBlack = String(game.blackPlayer.userId) === String(socket.userId);
+    if (!isWhite && !isBlack) return;
+
+    const opponentSocketId = isWhite ? game.blackPlayer.socketId : game.whitePlayer.socketId;
+    io.to(opponentSocketId).emit('draw_declined', { gameId });
+  });
+
   // Handle draw response
   socket.on('respond_draw', (data) => {
     const { gameId, accept } = data;

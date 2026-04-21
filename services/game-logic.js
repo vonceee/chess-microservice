@@ -134,8 +134,11 @@ function handleProcessResign(game, playerColor, io) {
  */
 function handleProcessAbort(game, playerColor, io) {
   if (game.status !== 'active') return { error: 'Game not active' };
-  if (game.moves && game.moves.length > 0) {
-    return { error: 'Cannot abort after move' };
+  const movesCount = game.moves ? game.moves.length : 0;
+  const canAbort = playerColor === 'white' ? movesCount === 0 : movesCount <= 1;
+
+  if (!canAbort) {
+    return { error: 'Cannot abort after your first move' };
   }
 
   game.status = 'aborted';

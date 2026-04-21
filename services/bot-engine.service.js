@@ -54,6 +54,7 @@ class BotEngineService {
      * Entry point for requesting a move. Puts the request in a queue.
      */
     async getBestMove(fen, level = 10) {
+        console.log(`[BotEngine] Requesting move for level ${level}. Queue length: ${this.queue.length}`);
         return new Promise((resolve) => {
             this.queue.push({ fen, level, resolve });
             this.processQueue();
@@ -77,12 +78,14 @@ class BotEngineService {
             }, 12000);
 
             // Send UCI commands
+            console.log(`[BotEngine] Calculating move for FEN: ${fen}`);
             engine.sendCommand('uci');
             engine.sendCommand(`setoption name Skill Level value ${level}`);
             engine.sendCommand('ucinewgame');
             engine.sendCommand(`position fen ${fen}`);
             
             const moveTime = this.calculateMoveTime(level);
+            console.log(`[BotEngine] Sent 'go movetime ${moveTime}'`);
             engine.sendCommand(`go movetime ${moveTime}`);
             
         } catch (err) {
@@ -139,12 +142,21 @@ class BotEngineService {
     }
 
     async restartEngine() {
-        console.warn('[BotEngine] Restarting Stockfish engine...');
+        console.warn('[BotEngine] Attempting to restart Stockfish engine...');
         if (this.engine) {
-            try { this.engine.terminate(); } catch (e) {}
+            try { 
+                // Some versions use terminate(), some don't. 
+                if (typeof this.engine.terminate === 'function') this.engine.terminate(); 
+            } catch (e) {
+                console.error('[BotEngine] Error during termination:', e);
+            }
             this.engine = null;
         }
-        await this.ensureEngine();
+        
+        // Wait a bit before re-initializing to let the process clean up
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        return await this.ensureEngine();
     }
 
     calculateMoveTime(level) {

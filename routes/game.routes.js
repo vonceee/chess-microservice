@@ -40,6 +40,10 @@ router.get('/ping', (req, res) => {
 
 // Create game
 router.post('/create-game', express.json(), (req, res) => {
+  if (req.header('X-Internal-Secret') !== config.INTERNAL_SECRET) {
+    console.warn('[Security] Unauthorized create-game attempt from', req.ip);
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
   const game = createGame(req.body);
   res.json({ success: true, gameId: game.id });
 });

@@ -15,9 +15,18 @@ const { initTvDirector } = require('./tv');
 const app = express();
 app.use(cors());
 const server = http.createServer(app);
+
+// START LISTENING IMMEDIATELY
+// This prevents "Port scan timeout" on Render while modules load
+const PORT = process.env.PORT || 3006;
+server.listen(PORT, () => {
+  console.log(`[Bootstrap] Chess microservice listening on port ${PORT}`);
+  console.log(`[Bootstrap] Binding successful. Initializing modules...`);
+});
+
 const io = new Server(server, {
   cors: {
-    origin: "*", // Configure for your frontend domain
+    origin: "*", 
     methods: ["GET", "POST"]
   }
 });
@@ -25,9 +34,7 @@ const io = new Server(server, {
 // Export io for use in other modules
 module.exports.io = io;
 
-
-
-// Initialize authentication
+console.log('[Bootstrap] Initializing authentication...');
 socketAuth(io);
 
 
@@ -37,9 +44,11 @@ socketAuth(io);
 
 
 // Initialize socket handlers
+console.log('[Bootstrap] Setting up socket handlers...');
 setupSocketHandlers(io);
 
 // Initialize TV director
+console.log('[Bootstrap] Initializing TV director...');
 initTvDirector(io);
 
 // Basic routes
@@ -47,10 +56,13 @@ app.get('/ping', (req, res) => res.json({ timestamp: new Date().toISOString() })
 app.get('/health', (req, res) => res.json({ status: 'ok', activeGames: games.size }));
 
 // API routes prefix
+console.log('[Bootstrap] Mounting routes...');
 app.use('/api', routes);
 // Fallback for /api/ping in case frontend uses the prefix
 app.get('/api/ping', (req, res) => res.json({ timestamp: new Date().toISOString() }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', activeGames: games.size }));
+
+console.log('[Bootstrap] Setup complete. System ready.');
 
 // Cleanup function for server shutdown
 function cleanupTimers() {
@@ -72,11 +84,4 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-// Start server
-const PORT = process.env.PORT || 3006;
-server.listen(PORT, () => {
-  console.log(`Chess microservice listening on port ${PORT}`);
-  console.log(`Environment: ${config.NODE_ENV}`);
-  console.log(`API Base URL: ${config.API_BASE_URL || 'not configured'}`);
-  console.log('Available endpoints: /api/create-game, /api/games/:id, /api/move, /api/resign, /api/draw, /api/abort, /api/sync-clock');
-});
+// Start server moved to top for early binding

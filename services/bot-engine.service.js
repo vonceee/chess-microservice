@@ -1,4 +1,5 @@
 const stockfish = require('stockfish');
+console.log('[Bootstrap] Stockfish module loaded successfully.');
 
 /**
  * Service to handle bot move generation using Stockfish engine.

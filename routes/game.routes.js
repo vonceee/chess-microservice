@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const config = require('../config');
 const { games, activePlayers, createGame } = require('../game');
 const { getEffectiveTimes: getEffectiveTimesClock, sanitizeGame } = require('../utils/clock');
 const { getLegalMoves: getLegalMovesChess } = require('../utils/chess');

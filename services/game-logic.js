@@ -41,6 +41,7 @@ function handleProcessMove(game, uciMove, playerColor, io) {
   // This gives both players a grace period for their first move.
   if (game.moves.length >= 2) {
     game.lastMoveTimestamp = now;
+    game.firstMoveCountdown = null;
   } else {
     game.lastMoveTimestamp = null;
   }

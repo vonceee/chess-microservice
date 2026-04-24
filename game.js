@@ -8,6 +8,7 @@ const { startAbandonmentCountdown, clearAbandonmentTimer, handlePlayerReconnecti
 const games = new Map(); // gameId -> game state
 const activePlayers = new Map(); // userId -> socketId
 const matchmakingQueue = []; // Queue for matchmaking
+const challenges = new Map(); // challengeId -> challenge state
 
 // Game state structure:
 // {
@@ -79,7 +80,7 @@ function createGame(gameData) {
     opponentAwayCountdown: null,
     gameStartedAt: new Date(),
     lastMoveTimestamp: null,
-    turnStartedAt: null,
+    turnStartedAt: new Date(),
     rematchOffer: null,
     rematchAccepted: false
   };
@@ -136,6 +137,7 @@ module.exports = {
   games,
   activePlayers,
   matchmakingQueue,
+  challenges,
   // Import and re-export from utils and abandonment
   validateMove,
   getGameStatus,

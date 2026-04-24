@@ -3,7 +3,7 @@ const { getLegalMoves } = require('../utils/chess');
 const { checkAndFlagTimeout, getEffectiveTimes } = require('../utils/clock');
 const { finalizeGame } = require('../utils/game-finisher');
 const { handleProcessMove, handleProcessResign, handleProcessAbort } = require('../services/game-logic');
-const { activePlayers } = require('../game');
+const { activePlayers, challenges } = require('../game');
 const botEngineService = require('../services/bot-engine.service');
 const config = require('../config');
 const axios = require('axios');
@@ -263,6 +263,114 @@ function setupGameHandlers(socket, io) {
 
     if (opponentSocketId) io.to(opponentSocketId).emit('rematch_declined', { gameId });
     game.rematchOffer = null;
+  });
+
+  // Direct Challenge handlers
+  socket.on('issue_challenge', (data) => {
+    const { targetUserId, settings } = data;
+    const targetSocketId = activePlayers.get(String(targetUserId));
+    
+    if (!targetSocketId) {
+      socket.emit('error', 'User is offline');
+      return;
+    }
+
+    const challengeId = Math.random().toString(36).substring(2, 9);
+    const challenge = {
+      id: challengeId,
+      challenger: { userId: socket.userId, name: socket.userName },
+      recipient: { userId: targetUserId, name: '' }, // Name filled if needed
+      settings,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    challenges.set(challengeId, challenge);
+    
+    // Notify recipient
+    io.to(targetSocketId).emit('challenge_offered', challenge);
+    // Notify challenger
+    socket.emit('challenge_issued', challenge);
+
+    // Auto-expire challenge after 5 minutes
+    setTimeout(() => {
+      if (challenges.has(challengeId)) {
+        challenges.delete(challengeId);
+        socket.emit('challenge_expired', { challengeId });
+        io.to(targetSocketId).emit('challenge_expired', { challengeId });
+      }
+    }, 5 * 60 * 1000);
+  });
+
+  socket.on('accept_challenge', async (data) => {
+    const { challengeId } = data;
+    const challenge = challenges.get(challengeId);
+
+    if (!challenge || String(challenge.recipient.userId) !== String(socket.userId)) {
+      socket.emit('error', 'Challenge not found or already processed');
+      return;
+    }
+
+    try {
+      // Determine colors
+      let whiteId, blackId;
+      if (challenge.settings.color === 'random') {
+        whiteId = Math.random() > 0.5 ? challenge.challenger.userId : socket.userId;
+        blackId = whiteId === challenge.challenger.userId ? socket.userId : challenge.challenger.userId;
+      } else if (challenge.settings.color === 'white') {
+        whiteId = challenge.challenger.userId;
+        blackId = socket.userId;
+      } else {
+        whiteId = socket.userId;
+        blackId = challenge.challenger.userId;
+      }
+
+      const response = await axios.post(`${config.API_BASE_URL}/api/internal/game/create`, {
+        white_id: whiteId,
+        black_id: blackId,
+        time_control: challenge.settings.timeControl
+      }, {
+        headers: { 
+          'Content-Type': 'application/json', 
+          'X-Internal-Secret': config.INTERNAL_SECRET 
+        }
+      });
+
+      const gameId = response.data.game_id;
+      challenges.delete(challengeId);
+
+      const challengerSocketId = activePlayers.get(String(challenge.challenger.userId));
+      const recipientSocketId = socket.id;
+
+      if (challengerSocketId) io.to(challengerSocketId).emit('challenge_accepted', { challengeId, gameId });
+      if (recipientSocketId) io.to(recipientSocketId).emit('challenge_accepted', { challengeId, gameId });
+
+    } catch (err) {
+      console.error('[Challenge] Accept error:', err.message);
+      socket.emit('error', 'Failed to create game');
+    }
+  });
+
+  socket.on('decline_challenge', (data) => {
+    const { challengeId } = data;
+    const challenge = challenges.get(challengeId);
+    if (!challenge) return;
+
+    const challengerSocketId = activePlayers.get(String(challenge.challenger.userId));
+    if (challengerSocketId) io.to(challengerSocketId).emit('challenge_declined', { challengeId });
+    
+    challenges.delete(challengeId);
+  });
+
+  socket.on('cancel_challenge', (data) => {
+    const { challengeId } = data;
+    const challenge = challenges.get(challengeId);
+    if (!challenge) return;
+
+    const recipientSocketId = activePlayers.get(String(challenge.recipient.userId));
+    if (recipientSocketId) io.to(recipientSocketId).emit('challenge_canceled', { challengeId });
+    
+    challenges.delete(challengeId);
   });
 }
 

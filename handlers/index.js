@@ -26,6 +26,7 @@ setInterval(() => {
         const remaining = Math.max(0, Math.ceil((limitMs - elapsed) / 1000));
         
         // Notify client of remaining time to make first move
+        game.firstMoveCountdown = remaining;
         io.to(gameId).emit('first_move_countdown', { 
           gameId, 
           secondsRemaining: remaining 

@@ -2,7 +2,7 @@ const activeStudies = new Map(); // studyId -> { ownerId, currentChapterId, fen,
 
 function setupStudyHandlers(socket, io) {
   socket.on('join_study', (data) => {
-    const { studyId, ownerId, initialState } = data;
+    const { studyId, ownerId, initialState, collaboratorIds } = data;
     
     socket.join(studyId);
     
@@ -12,11 +12,15 @@ function setupStudyHandlers(socket, io) {
     if (!state || state.ownerId === 'undefined' || state.ownerId === 'null') {
       activeStudies.set(studyId, {
         ownerId: String(ownerId),
+        collaboratorIds: (collaboratorIds || []).map(id => String(id)),
         currentChapterId: initialState?.chapterId || null,
         fen: initialState?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
         moves: initialState?.moves || [],
         shapes: []
       });
+    } else if (collaboratorIds) {
+      // Update collaborators list if owner joins (or anyone joins with new list)
+      state.collaboratorIds = (collaboratorIds || []).map(id => String(id));
     }
 
     const currentState = activeStudies.get(studyId);
@@ -29,9 +33,13 @@ function setupStudyHandlers(socket, io) {
     const study = activeStudies.get(studyId);
 
     if (!study) return;
-    if (socket.userId !== study.ownerId) return;
+    
+    const isOwner = String(socket.userId) === String(study.ownerId);
+    const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
+    
+    if (!isOwner && !isCollaborator) return;
 
-    // Trust the full tree sent by the owner
+    // Trust the full tree sent by the owner/collaborator
     if (moves) {
       study.moves = moves;
     }
@@ -46,7 +54,11 @@ function setupStudyHandlers(socket, io) {
   socket.on('study_delete_node', (data) => {
     const { studyId, chapterId, nodeId } = data;
     const study = activeStudies.get(studyId);
-    if (!study || socket.userId !== study.ownerId) return;
+    
+    if (!study) return;
+    const isOwner = String(socket.userId) === String(study.ownerId);
+    const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
+    if (!isOwner && !isCollaborator) return;
 
     if (findAndDelete(study.moves, nodeId)) {
       io.to(studyId).emit('study_node_deleted', { chapterId, nodeId });
@@ -56,7 +68,11 @@ function setupStudyHandlers(socket, io) {
   socket.on('study_update_comment', (data) => {
     const { studyId, chapterId, nodeId, comment } = data;
     const study = activeStudies.get(studyId);
-    if (!study || socket.userId !== study.ownerId) return;
+    
+    if (!study) return;
+    const isOwner = String(socket.userId) === String(study.ownerId);
+    const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
+    if (!isOwner && !isCollaborator) return;
 
     if (findAndUpdateComment(study.moves, nodeId, comment)) {
       io.to(studyId).emit('study_comment_updated', { chapterId, nodeId, comment });
@@ -66,7 +82,11 @@ function setupStudyHandlers(socket, io) {
   socket.on('study_draw_shapes', (data) => {
     const { studyId, shapes } = data;
     const study = activeStudies.get(studyId);
-    if (!study || socket.userId !== study.ownerId) return;
+    
+    if (!study) return;
+    const isOwner = String(socket.userId) === String(study.ownerId);
+    const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
+    if (!isOwner && !isCollaborator) return;
 
     study.shapes = shapes;
     io.to(studyId).emit('study_shapes_drawn', { shapes, userId: socket.userId });
@@ -75,7 +95,11 @@ function setupStudyHandlers(socket, io) {
   socket.on('study_change_chapter', (data) => {
     const { studyId, chapterId, fen, moves } = data;
     const study = activeStudies.get(studyId);
-    if (!study || socket.userId !== study.ownerId) return;
+    
+    if (!study) return;
+    const isOwner = String(socket.userId) === String(study.ownerId);
+    const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
+    if (!isOwner && !isCollaborator) return;
 
     study.currentChapterId = chapterId;
     study.fen = fen;

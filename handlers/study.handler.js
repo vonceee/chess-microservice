@@ -4,13 +4,13 @@ function setupStudyHandlers(socket, io) {
   socket.on('join_study', (data) => {
     const { studyId, ownerId, initialState, collaboratorIds } = data;
     
-    socket.join(studyId);
+    socket.join(String(studyId));
     
-    const state = activeStudies.get(studyId);
+    const state = activeStudies.get(String(studyId));
 
     // Initialize study state if not present OR if ownerId was corrupted as "undefined"
     if (!state || state.ownerId === 'undefined' || state.ownerId === 'null') {
-      activeStudies.set(studyId, {
+      activeStudies.set(String(studyId), {
         ownerId: String(ownerId),
         collaboratorIds: (collaboratorIds || []).map(id => String(id)),
         currentChapterId: initialState?.chapterId || null,
@@ -23,14 +23,15 @@ function setupStudyHandlers(socket, io) {
       state.collaboratorIds = (collaboratorIds || []).map(id => String(id));
     }
 
-    const currentState = activeStudies.get(studyId);
+    const currentState = activeStudies.get(String(studyId));
     socket.emit('study_synced', currentState);
     console.log(`User ${socket.userId} joined study ${studyId}`);
+    broadcastViewers(io, String(studyId));
   });
 
   socket.on('study_move', (data) => {
     const { studyId, move, fen, chapterId, moves } = data;
-    const study = activeStudies.get(studyId);
+    const study = activeStudies.get(String(studyId));
 
     if (!study) return;
     
@@ -48,12 +49,12 @@ function setupStudyHandlers(socket, io) {
     study.currentChapterId = chapterId;
     study.shapes = [];
 
-    io.to(studyId).emit('study_move_made', { ...data, userId: socket.userId });
+    io.to(String(studyId)).emit('study_move_made', { ...data, userId: socket.userId });
   });
 
   socket.on('study_delete_node', (data) => {
     const { studyId, chapterId, nodeId } = data;
-    const study = activeStudies.get(studyId);
+    const study = activeStudies.get(String(studyId));
     
     if (!study) return;
     const isOwner = String(socket.userId) === String(study.ownerId);
@@ -61,13 +62,13 @@ function setupStudyHandlers(socket, io) {
     if (!isOwner && !isCollaborator) return;
 
     if (findAndDelete(study.moves, nodeId)) {
-      io.to(studyId).emit('study_node_deleted', { chapterId, nodeId });
+      io.to(String(studyId)).emit('study_node_deleted', { chapterId, nodeId });
     }
   });
 
   socket.on('study_update_comment', (data) => {
     const { studyId, chapterId, nodeId, comment } = data;
-    const study = activeStudies.get(studyId);
+    const study = activeStudies.get(String(studyId));
     
     if (!study) return;
     const isOwner = String(socket.userId) === String(study.ownerId);
@@ -75,13 +76,13 @@ function setupStudyHandlers(socket, io) {
     if (!isOwner && !isCollaborator) return;
 
     if (findAndUpdateComment(study.moves, nodeId, comment)) {
-      io.to(studyId).emit('study_comment_updated', { chapterId, nodeId, comment });
+      io.to(String(studyId)).emit('study_comment_updated', { chapterId, nodeId, comment });
     }
   });
 
   socket.on('study_draw_shapes', (data) => {
     const { studyId, shapes } = data;
-    const study = activeStudies.get(studyId);
+    const study = activeStudies.get(String(studyId));
     
     if (!study) return;
     const isOwner = String(socket.userId) === String(study.ownerId);
@@ -89,12 +90,12 @@ function setupStudyHandlers(socket, io) {
     if (!isOwner && !isCollaborator) return;
 
     study.shapes = shapes;
-    io.to(studyId).emit('study_shapes_drawn', { shapes, userId: socket.userId });
+    io.to(String(studyId)).emit('study_shapes_drawn', { shapes, userId: socket.userId });
   });
 
   socket.on('study_change_chapter', (data) => {
     const { studyId, chapterId, fen, moves } = data;
-    const study = activeStudies.get(studyId);
+    const study = activeStudies.get(String(studyId));
     
     if (!study) return;
     const isOwner = String(socket.userId) === String(study.ownerId);
@@ -106,12 +107,68 @@ function setupStudyHandlers(socket, io) {
     study.moves = moves;
     study.shapes = [];
 
-    io.to(studyId).emit('study_chapter_changed', { chapterId, fen, moves });
+    io.to(String(studyId)).emit('study_chapter_changed', { chapterId, fen, moves });
   });
 
   socket.on('leave_study', (studyId) => {
-    socket.leave(studyId);
+    socket.leave(String(studyId));
+    broadcastViewers(io, String(studyId));
   });
+
+  socket.on('disconnecting', async () => {
+    for (const room of socket.rooms) {
+      if (activeStudies.has(room)) {
+        const sockets = await io.in(room).fetchSockets();
+        if (sockets) {
+          const uniqueViewers = new Map();
+          for (const s of sockets) {
+            if (s.id === socket.id) continue;
+            const uId = s.data?.userId || s.userId;
+            const uName = s.data?.userName || s.userName;
+            if (uName && uId) {
+              uniqueViewers.set(uId, uName);
+            }
+          }
+          const viewers = Array.from(uniqueViewers.values());
+          socket.to(room).emit('viewer_list_update', { 
+            studyId: room, 
+            viewers, 
+            count: sockets.length - 1 
+          });
+        }
+      }
+    }
+  });
+}
+
+async function broadcastViewers(io, studyId) {
+  const roomId = String(studyId);
+  try {
+    const sockets = await io.in(roomId).fetchSockets();
+    
+    if (!sockets) {
+      io.to(roomId).emit('viewer_list_update', { studyId, viewers: [], count: 0 });
+      return;
+    }
+
+    const uniqueViewers = new Map(); // userId -> userName
+    for (const s of sockets) {
+      const uId = s.data?.userId || s.userId;
+      const uName = s.data?.userName || s.userName;
+      if (uName && uId) {
+        uniqueViewers.set(uId, uName);
+      }
+    }
+
+    const viewers = Array.from(uniqueViewers.values());
+    io.to(roomId).emit('viewer_list_update', { 
+      studyId, 
+      viewers, 
+      count: sockets.length 
+    });
+  } catch (err) {
+    console.error('[Study] broadcastViewers error:', err);
+  }
 }
 
 function findAndInsertByPath(nodes, path, newNode) {

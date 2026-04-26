@@ -26,6 +26,10 @@ function socketAuth(io) {
         socket.userName = providedUserName || 'Anonymous';
       }
 
+      // Populate data for room traversal/fetchSockets
+      socket.data.userId = socket.userId;
+      socket.data.userName = socket.userName;
+
       if (socket.userId && !socket.userId.startsWith('guest_')) {
         // Store active player
         activePlayers.set(socket.userId, socket.id);

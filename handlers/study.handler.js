@@ -25,6 +25,7 @@ function setupStudyHandlers(socket, io) {
 
     const currentState = activeStudies.get(String(studyId));
     socket.emit('study_synced', currentState);
+    
     console.log(`User ${socket.userId} joined study ${studyId}`);
     broadcastViewers(io, String(studyId));
   });
@@ -108,6 +109,29 @@ function setupStudyHandlers(socket, io) {
     study.shapes = [];
 
     io.to(String(studyId)).emit('study_chapter_changed', { chapterId, fen, moves });
+  });
+
+  socket.on('study_send_chat', (data) => {
+    const { studyId, text } = data;
+    const study = activeStudies.get(String(studyId));
+    if (!study) return;
+
+    const message = {
+      text,
+      senderName: socket.userName || 'Anonymous',
+      senderId: socket.userId,
+      timestamp: new Date().toISOString()
+    };
+
+    io.to(String(studyId)).emit('study_chat_message', message);
+  });
+
+  socket.on('study_clear_chat', (data) => {
+    const { studyId } = data;
+    const study = activeStudies.get(String(studyId));
+    if (!study) return;
+
+    io.to(String(studyId)).emit('study_chat_cleared');
   });
 
   socket.on('leave_study', (studyId) => {

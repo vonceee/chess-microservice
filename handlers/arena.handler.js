@@ -97,6 +97,21 @@ function setupArenaHandlers(socket, io) {
       socket.leave(`arena:${arenaId}`);
     }
   });
+
+  socket.on('arena_send_chat', (data) => {
+    const { arenaId, text } = data;
+    const arena = arenas.get(arenaId);
+    if (!arena) return;
+
+    const message = {
+      text,
+      senderName: socket.userName || 'Anonymous',
+      senderId: socket.userId,
+      timestamp: new Date().toISOString()
+    };
+
+    io.to(`arena:${arenaId}`).emit('arena_chat_message', message);
+  });
 }
 
 module.exports = { setupArenaHandlers };

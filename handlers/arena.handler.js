@@ -70,6 +70,7 @@ function setupArenaHandlers(socket, io) {
       winner: arena.getWinner()
     });
     arena.broadcastLeaderboard();
+    broadcastViewers(io, arenaId);
   });
 
   socket.on('start_pairing', (arenaId) => {
@@ -78,6 +79,7 @@ function setupArenaHandlers(socket, io) {
       arena.join({ userId: socket.userId }, true);
       socket.emit('pairing_started', { arenaId });
       arena.broadcastLeaderboard();
+      broadcastViewers(io, arenaId);
     }
   });
 
@@ -87,6 +89,7 @@ function setupArenaHandlers(socket, io) {
       arena.leave(socket.userId);
       socket.emit('pairing_stopped', { arenaId });
       arena.broadcastLeaderboard();
+      broadcastViewers(io, arenaId);
     }
   });
 
@@ -95,6 +98,7 @@ function setupArenaHandlers(socket, io) {
     if (arena) {
       arena.leave(socket.userId);
       socket.leave(`arena:${arenaId}`);
+      broadcastViewers(io, arenaId);
     }
   });
 
@@ -112,6 +116,62 @@ function setupArenaHandlers(socket, io) {
 
     io.to(`arena:${arenaId}`).emit('arena_chat_message', message);
   });
+
+  socket.on('disconnecting', async () => {
+    for (const room of socket.rooms) {
+      if (room.startsWith('arena:')) {
+        const arenaId = room.split(':')[1];
+        // We need a slight delay or use to(room).emit to reach others before we're fully gone
+        const sockets = await io.in(room).fetchSockets();
+        if (sockets) {
+          const uniqueViewers = new Map();
+          for (const s of sockets) {
+            if (s.id === socket.id) continue;
+            const uId = s.data?.userId || s.userId;
+            const uName = s.data?.userName || s.userName;
+            if (uName && uId) {
+              uniqueViewers.set(uId, uName);
+            }
+          }
+          const viewers = Array.from(uniqueViewers.values());
+          socket.to(room).emit('viewer_list_update', { 
+            arenaId, 
+            viewers, 
+            count: sockets.length - 1 
+          });
+        }
+      }
+    }
+  });
+}
+
+async function broadcastViewers(io, arenaId) {
+  const roomId = `arena:${arenaId}`;
+  try {
+    const sockets = await io.in(roomId).fetchSockets();
+    
+    if (!sockets || sockets.length === 0) {
+      return;
+    }
+
+    const uniqueViewers = new Map(); // userId -> userName
+    for (const s of sockets) {
+      const uId = s.data?.userId || s.userId;
+      const uName = s.data?.userName || s.userName;
+      if (uName && uId) {
+        uniqueViewers.set(uId, uName);
+      }
+    }
+
+    const viewers = Array.from(uniqueViewers.values());
+    io.to(roomId).emit('viewer_list_update', { 
+      arenaId, 
+      viewers, 
+      count: sockets.length 
+    });
+  } catch (err) {
+    console.error('[Arena] broadcastViewers error:', err);
+  }
 }
 
 module.exports = { setupArenaHandlers };

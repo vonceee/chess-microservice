@@ -286,24 +286,79 @@ class Arena {
     this.broadcastLeaderboard();
   }
 
-  getTopGameId() {
-    if (this.activeGames.size === 0) return null;
+  getTopGames(limit = 4) {
+    if (this.activeGames.size === 0) return [];
 
-    // Get leaderboard sorted by score/rating
     const leaderboard = Array.from(this.participants.values())
       .sort((a, b) => b.score - a.score || b.rating - a.rating);
 
-    // Find the first player who is in an active game
+    const topGames = [];
+    const seenGames = new Set();
+
+    // 1. Prioritize games with top leaderboard players
     for (const p of leaderboard) {
+      if (topGames.length >= limit) break;
+
       for (const [gameId, players] of this.activeGames.entries()) {
+        if (seenGames.has(gameId)) continue;
+
         if (players.whiteId === p.userId || players.blackId === p.userId) {
-          return gameId;
+          const white = this.participants.get(players.whiteId);
+          const black = this.participants.get(players.blackId);
+          
+          if (white && black) {
+            topGames.push({
+              gameId,
+              white: { 
+                name: white.name, 
+                rating: white.rating,
+                rank: leaderboard.findIndex(lp => lp.userId === players.whiteId) + 1
+              },
+              black: { 
+                name: black.name, 
+                rating: black.rating,
+                rank: leaderboard.findIndex(lp => lp.userId === players.blackId) + 1
+              }
+            });
+            seenGames.add(gameId);
+            if (topGames.length >= limit) break;
+          }
         }
       }
     }
+    
+    // 2. Fill remaining slots with any other active games
+    if (topGames.length < limit) {
+        for (const [gameId, players] of this.activeGames.entries()) {
+            if (seenGames.has(gameId)) continue;
+            const white = this.participants.get(players.whiteId);
+            const black = this.participants.get(players.blackId);
+            if (white && black) {
+                topGames.push({
+                  gameId,
+                  white: { 
+                    name: white.name, 
+                    rating: white.rating,
+                    rank: leaderboard.findIndex(lp => lp.userId === players.whiteId) + 1
+                  },
+                  black: { 
+                    name: black.name, 
+                    rating: black.rating,
+                    rank: leaderboard.findIndex(lp => lp.userId === players.blackId) + 1
+                  }
+                });
+                seenGames.add(gameId);
+                if (topGames.length >= limit) break;
+            }
+        }
+    }
 
-    // Fallback: return the first active game recorded if no leaderboard match (unlikely)
-    return this.activeGames.keys().next().value || null;
+    return topGames;
+  }
+
+  getTopGameId() {
+    const topGames = this.getTopGames(1);
+    return topGames.length > 0 ? topGames[0].gameId : null;
   }
 
   updatePlayerScore(userId, resultType, opponentId) {
@@ -349,7 +404,8 @@ class Arena {
     io.to(`arena:${this.id}`).emit('arena_leaderboard_update', {
       arenaId: this.id,
       leaderboard,
-      topGameId: this.getTopGameId()
+      topGameId: this.getTopGameId(),
+      topGames: this.getTopGames(4)
     });
   }
 

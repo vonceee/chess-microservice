@@ -33,6 +33,7 @@ function setupArenaHandlers(socket, io) {
             }
 
             const newArena = new Arena(arenaId, {
+              name: data.name,
               timeControl, 
               durationMinutes, 
               initialTimeMs, 
@@ -63,6 +64,8 @@ function setupArenaHandlers(socket, io) {
     arena.join({ userId: socket.userId, name: name || 'Guest', rating: rating || 1500 }, false);
     socket.emit('arena_joined', { 
       arenaId, 
+      name: arena.options.name || arenaId,
+      timeControl: arena.options.timeControl,
       startTime: arena.startTime,
       endTime: arena.endTime, 
       isWaiting: arena.waitingRoom.has(socket.userId),

@@ -38,7 +38,8 @@ function setupArenaHandlers(socket, io) {
               durationMinutes, 
               initialTimeMs, 
               incrementMs,
-              startsAt: data.start_date
+              startsAt: data.start_date,
+              standings: data.standings
             });
             arenas.set(arenaId, newArena);
           } catch (err) {

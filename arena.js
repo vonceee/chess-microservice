@@ -10,6 +10,23 @@ class Arena {
   constructor(id, options = {}) {
     this.id = id;
     this.participants = new Map(); // userId -> { score, streak, rating, name, lastOpponentId }
+    
+    // Re-hydrate from previous state if available
+    if (options.standings && Array.isArray(options.standings)) {
+      console.log(`[Arena] Re-hydrating ${id} with ${options.standings.length} participants`);
+      options.standings.forEach(p => {
+        this.participants.set(p.userId, {
+          userId: p.userId,
+          name: p.name || 'Unknown',
+          rating: p.rating || 1500,
+          score: p.score || 0,
+          streak: p.streak || 0,
+          lastOpponentId: null,
+          isWaiting: false
+        });
+      });
+    }
+
     this.waitingRoom = new Set(); // Set of userIds
     this.activeGames = new Map(); // gameId -> { whiteId, blackId }
     this.options = {
@@ -61,7 +78,9 @@ class Arena {
   }
 
   join(user, wait = false) {
-    if (!this.participants.has(user.userId)) {
+    // Only add to participants if they are actually joining (wait=true)
+    // or if they are already in the participants list.
+    if (wait && !this.participants.has(user.userId)) {
       this.participants.set(user.userId, {
         userId: user.userId,
         name: user.name,
@@ -73,9 +92,21 @@ class Arena {
       });
     }
     
+    // If they are already a participant, we can update their name/rating if provided
+    // This handles the case where a user joins as a spectator first, then as a player.
+    if (this.participants.has(user.userId)) {
+        const p = this.participants.get(user.userId);
+        if (user.name && user.name !== 'Guest' && user.name !== 'Anonymous') {
+            p.name = user.name;
+        }
+        if (user.rating) p.rating = user.rating;
+    }
+
     if (wait) {
       this.waitingRoom.add(user.userId);
-      this.participants.get(user.userId).isWaiting = true;
+      if (this.participants.has(user.userId)) {
+        this.participants.get(user.userId).isWaiting = true;
+      }
     }
   }
 
@@ -284,6 +315,9 @@ class Arena {
     
     // Broadcast update
     this.broadcastLeaderboard();
+
+    // Sync intermediate standings to Laravel for persistence
+    this.syncStandingsToLaravel(false);
   }
 
   getTopGames(limit = 4) {
@@ -427,20 +461,25 @@ class Arena {
     this.syncStandingsToLaravel();
   }
 
-  async syncStandingsToLaravel() {
+  async syncStandingsToLaravel(isFinal = true) {
     const leaderboard = Array.from(this.participants.values())
       .map(p => ({
         userId: p.userId,
+        name: p.name,
         score: p.score,
-        streak: p.streak
+        streak: p.streak,
+        rating: p.rating
       }))
       .sort((a, b) => b.score - a.score);
 
     const payload = JSON.stringify({ standings: leaderboard });
+    const endpoint = isFinal 
+        ? `/api/internal/arena/${this.id}/finalize`
+        : `/api/internal/arena/${this.id}/sync-standings`;
 
     try {
-      await this.syncToLaravel(`/api/internal/arena/${this.id}/finalize`, payload);
-      console.log(`[Arena] Successfully finalized ${this.id}`);
+      await this.syncToLaravel(endpoint, payload);
+      console.log(`[Arena] Successfully ${isFinal ? 'finalized' : 'synced'} ${this.id}`);
     } catch (err) {
       console.error(`[Arena] Error syncing standings for ${this.id}:`, err.message);
     }

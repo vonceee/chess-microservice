@@ -21,6 +21,8 @@ class Arena {
           rating: p.rating || 1500,
           score: p.score || 0,
           streak: p.streak || 0,
+          games: p.games || [],
+          performance: p.performance || 0,
           lastOpponentId: null,
           isWaiting: false
         });
@@ -87,6 +89,8 @@ class Arena {
         rating: user.rating || 1500,
         score: 0,
         streak: 0,
+        games: [],
+        performance: 0,
         lastOpponentId: null,
         isWaiting: false
       });
@@ -307,8 +311,8 @@ class Arena {
     this.activeGames.delete(gameId);
 
     // Update scores and streaks for both players
-    this.updatePlayerScore(whiteId, result === '1-0' ? 'win' : (result === '1/2-1/2' ? 'draw' : 'loss'), blackId);
-    this.updatePlayerScore(blackId, result === '0-1' ? 'win' : (result === '1/2-1/2' ? 'draw' : 'loss'), whiteId);
+    this.updatePlayerScore(whiteId, result === '1-0' ? 'win' : (result === '1/2-1/2' ? 'draw' : 'loss'), blackId, gameId, 'white');
+    this.updatePlayerScore(blackId, result === '0-1' ? 'win' : (result === '1/2-1/2' ? 'draw' : 'loss'), whiteId, gameId, 'black');
 
     // Do NOT auto-add to waiting room anymore. 
     // Players will join the queue when they return to the lobby.
@@ -395,14 +399,16 @@ class Arena {
     return topGames.length > 0 ? topGames[0].gameId : null;
   }
 
-  updatePlayerScore(userId, resultType, opponentId) {
+  updatePlayerScore(userId, resultType, opponentId, gameId, color) {
     // If the game ended AFTER the arena ended, don't count the points
     if (Date.now() > this.endTime) {
       console.log(`[Arena] Game ended after arena expiration for user ${userId}. Score not updated.`);
       return;
     }
-
+    
     const p = this.participants.get(userId);
+    const opponent = this.participants.get(opponentId);
+    if (!p) return;
 
     let points = 0;
     const isOnFire = p.streak >= 2;
@@ -419,6 +425,40 @@ class Arena {
     }
 
     p.score += points;
+
+    // Record game history
+    p.games.push({
+      gameId,
+      opponentName: opponent ? opponent.name : 'Unknown',
+      opponentRating: opponent ? opponent.rating : 0,
+      result: resultType,
+      points,
+      color,
+      timestamp: Date.now()
+    });
+
+    // Update performance rating
+    p.performance = this.calculatePerformance(p.games);
+  }
+
+  calculatePerformance(games) {
+    if (!games || games.length === 0) return 0;
+    
+    let totalOpponentRating = 0;
+    let totalScore = 0;
+    
+    for (const g of games) {
+      totalOpponentRating += g.opponentRating;
+      if (g.result === 'win') totalScore += 1;
+      else if (g.result === 'draw') totalScore += 0.5;
+    }
+    
+    const avgOpponentRating = totalOpponentRating / games.length;
+    const scorePercentage = totalScore / games.length;
+    
+    // Simple performance rating formula: Avg Opponent Rating + (Score% - 0.5) * 800
+    // Lichess uses a more complex one, but this is a good approximation.
+    return Math.round(avgOpponentRating + (scorePercentage - 0.5) * 800);
   }
 
   broadcastLeaderboard() {
@@ -431,6 +471,8 @@ class Arena {
         score: p.score,
         streak: p.streak,
         rating: p.rating,
+        games: p.games,
+        performance: p.performance,
         isWaiting: this.waitingRoom.has(p.userId)
       }))
       .sort((a, b) => b.score - a.score || b.rating - a.rating);
@@ -468,7 +510,9 @@ class Arena {
         name: p.name,
         score: p.score,
         streak: p.streak,
-        rating: p.rating
+        rating: p.rating,
+        games: p.games,
+        performance: p.performance
       }))
       .sort((a, b) => b.score - a.score);
 

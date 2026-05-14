@@ -6,27 +6,36 @@ function setupStudyHandlers(socket, io) {
     
     socket.join(String(studyId));
     
-    const state = activeStudies.get(String(studyId));
+    let state = activeStudies.get(String(studyId));
+    const isOwner = String(socket.userId) === String(ownerId);
 
-    // Initialize study state if not present OR if ownerId was corrupted as "undefined"
-    if (!state || state.ownerId === 'undefined' || state.ownerId === 'null') {
-      activeStudies.set(String(studyId), {
+    // Initialize study state if not present OR if owner joins (they have the freshest DB state)
+    if (!state || state.ownerId === 'undefined' || state.ownerId === 'null' || isOwner) {
+      const newState = {
         ownerId: String(ownerId),
         collaboratorIds: (collaboratorIds || []).map(id => String(id)),
-        currentChapterId: initialState?.chapterId || null,
-        fen: initialState?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-        moves: initialState?.moves || [],
-        shapes: []
-      });
+        currentChapterId: initialState?.chapterId || state?.currentChapterId || null,
+        fen: initialState?.fen || state?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+        moves: initialState?.moves || state?.moves || [],
+        shapes: state?.shapes || []
+      };
+      
+      activeStudies.set(String(studyId), newState);
+      state = newState;
+      
+      if (isOwner) {
+        console.log(`[Study] Owner ${socket.userId} updated state for study ${studyId}`);
+      } else {
+        console.log(`[Study] Initialized state for study ${studyId}`);
+      }
     } else if (collaboratorIds) {
-      // Update collaborators list if owner joins (or anyone joins with new list)
+      // Update collaborators list if anyone joins with new list
       state.collaboratorIds = (collaboratorIds || []).map(id => String(id));
     }
 
-    const currentState = activeStudies.get(String(studyId));
-    socket.emit('study_synced', currentState);
+    socket.emit('study_synced', state);
     
-    console.log(`User ${socket.userId} joined study ${studyId}`);
+    console.log(`[Study] User ${socket.userId} (${socket.userName}) joined study ${studyId}`);
     broadcastViewers(io, String(studyId));
   });
 
@@ -34,12 +43,18 @@ function setupStudyHandlers(socket, io) {
     const { studyId, move, fen, chapterId, moves } = data;
     const study = activeStudies.get(String(studyId));
 
-    if (!study) return;
+    if (!study) {
+      console.warn(`[Study] study_move received for inactive study ${studyId}`);
+      return;
+    }
     
     const isOwner = String(socket.userId) === String(study.ownerId);
     const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
     
-    if (!isOwner && !isCollaborator) return;
+    if (!isOwner && !isCollaborator) {
+      console.warn(`[Study] Unauthorized move attempt by ${socket.userId} in study ${studyId}`);
+      return;
+    }
 
     // Trust the full tree sent by the owner/collaborator
     if (moves) {
@@ -51,6 +66,7 @@ function setupStudyHandlers(socket, io) {
     study.shapes = [];
 
     io.to(String(studyId)).emit('study_move_made', { ...data, userId: socket.userId });
+    console.log(`[Study] Move made in study ${studyId}, chapter ${chapterId} by ${socket.userId}`);
   });
 
   socket.on('study_delete_node', (data) => {
@@ -143,7 +159,13 @@ function setupStudyHandlers(socket, io) {
     for (const room of socket.rooms) {
       if (activeStudies.has(room)) {
         const sockets = await io.in(room).fetchSockets();
-        if (sockets) {
+        
+        // If this was the last person in the room, cleanup the memory
+        // (sockets.length <= 1 because the current socket is still in the room while 'disconnecting')
+        if (!sockets || sockets.length <= 1) {
+          console.log(`[Study] Room ${room} is empty, clearing from memory`);
+          activeStudies.delete(room);
+        } else {
           const uniqueViewers = new Map();
           for (const s of sockets) {
             if (s.id === socket.id) continue;

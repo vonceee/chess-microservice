@@ -58,6 +58,21 @@ app.get('/health', (req, res) => res.json({ status: 'ok', activeGames: games.siz
 // API routes prefix
 console.log('[Bootstrap] Mounting routes...');
 app.use('/api', routes);
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error('[Error] Unhandled request error:', {
+    message: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+    body: req.body
+  });
+  res.status(500).json({ 
+    message: 'Internal Server Error',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
+});
 // Fallback for /api/ping in case frontend uses the prefix
 app.get('/api/ping', (req, res) => res.json({ timestamp: new Date().toISOString() }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', activeGames: games.size }));

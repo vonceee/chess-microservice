@@ -45,8 +45,20 @@ router.post('/create-game', express.json(), (req, res) => {
     console.warn('[Security] Unauthorized create-game attempt from', req.ip);
     return res.status(401).json({ message: 'Unauthorized' });
   }
-  const game = createGame(req.body);
-  res.json({ success: true, gameId: game.id });
+
+  try {
+    console.log('[Game] Creating new game:', req.body.gameId, {
+      white: req.body.whitePlayer?.name,
+      black: req.body.blackPlayer?.name,
+      timeControl: req.body.timeControl
+    });
+
+    const game = createGame(req.body);
+    res.json({ success: true, gameId: game.id });
+  } catch (error) {
+    console.error('[Game] Failed to create game:', error);
+    res.status(500).json({ message: 'Failed to create game', error: error.message });
+  }
 });
 
 // Get game state

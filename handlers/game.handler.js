@@ -4,7 +4,6 @@ const { checkAndFlagTimeout, getEffectiveTimes } = require('../utils/clock');
 const { finalizeGame } = require('../utils/game-finisher');
 const { handleProcessMove, handleProcessResign, handleProcessAbort } = require('../services/game-logic');
 const { activePlayers, challenges } = require('../game');
-const botEngineService = require('../services/bot-engine.service');
 const config = require('../config');
 const axios = require('axios');
 
@@ -47,10 +46,6 @@ function setupGameHandlers(socket, io) {
       legalMoves: getLegalMoves(game.fen)
     });
 
-    // If it's a bot's turn and no moves have been made yet, trigger it
-    if (game.moves.length === 0 && ((playerColor === 'black' && game.turn === 'white') || (playerColor === 'white' && game.turn === 'black'))) {
-        checkAndTriggerBotMove(game, io);
-    }
   });
 
   // Handle move
@@ -80,8 +75,7 @@ function setupGameHandlers(socket, io) {
     if (result.error) {
       socket.emit('error', result.error);
     } else {
-      // After a successful move, check if the next turn is a bot
-      checkAndTriggerBotMove(game, io);
+      // Move already handled by handleProcessMove
     }
   });
 
@@ -374,48 +368,5 @@ function setupGameHandlers(socket, io) {
   });
 }
 
-async function checkAndTriggerBotMove(game, io) {
-  if (game.status !== 'active') return;
-
-  const currentTurn = game.turn;
-  const player = currentTurn === 'white' ? game.whitePlayer : game.blackPlayer;
-
-  if (!player.isBot) return;
-
-  console.log(`[BotMatch] Thinking for ${player.name} (${currentTurn})...`);
-
-  // 1. Human-like delay: Faster for first move to avoid auto-abort (1-3s), normal after (2-6s)
-  const isFirstMove = game.moves.length === 0;
-  const delay = isFirstMove 
-    ? Math.floor(Math.random() * 2000) + 1000 
-    : Math.floor(Math.random() * 4000) + 2000;
-  
-  setTimeout(async () => {
-    // Re-verify game state hasn't changed during delay
-    if (game.status !== 'active' || game.turn !== currentTurn) return;
-
-    try {
-      // 2. Map rating to Stockfish skill level (0-20)
-      const rating = player.rating || 1500;
-      const skillLevel = Math.max(0, Math.min(20, Math.floor((rating - 400) / 100)));
-
-      // 3. Get best move
-      const move = await botEngineService.getBestMove(game.fen, skillLevel);
-      
-      if (move) {
-        console.log(`[BotMatch] ${player.name} plays ${move.from}${move.to}${move.promotion || ''}`);
-        
-        // 4. Process the move (use same logic as human player)
-        // We simulate the 'io' and 'game' context
-        handleProcessMove(game, `${move.from}${move.to}${move.promotion || ''}`, currentTurn, io);
-        
-        // 5. Check if next turn is ALSO a bot (rare but possible in bot vs bot)
-        checkAndTriggerBotMove(game, io);
-      }
-    } catch (err) {
-      console.error('[BotMatch] Error generating bot move:', err);
-    }
-  }, delay);
-}
 
 module.exports = { setupGameHandlers };

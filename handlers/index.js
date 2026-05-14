@@ -6,6 +6,8 @@ const { setIo } = require('../arena');
 const { games, activePlayers, matchmakingQueue, checkAndFlagTimeout, handlePlayerReconnection, startAbandonmentCountdown } = require('../game');
 const { finalizeGame } = require('../utils/game-finisher');
 
+const { notifyUserDisconnected } = require('../utils/laravel-notifier');
+
 let lastSyncTime = 0;
 
 // Game Heartbeat Timer: Checks for timeouts every 1s
@@ -106,6 +108,8 @@ function setupSocketHandlers(io) {
         activePlayers.delete(socket.userId);
         // Notify all clients about user presence
         io.emit('presence_update', { userId: socket.userId, online: false });
+        // Notify Laravel to cleanup any matchmaking seeks
+        notifyUserDisconnected(socket.userId);
       }
 
       // Handle abandonment

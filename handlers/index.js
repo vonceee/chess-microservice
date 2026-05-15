@@ -3,12 +3,23 @@ const { setupArenaHandlers } = require('./arena.handler');
 const { setupTvHandlers } = require('./tv.handler');
 const { setupStudyHandlers } = require('./study.handler');
 const { setIo } = require('../arena');
-const { games, activePlayers, matchmakingQueue, checkAndFlagTimeout, handlePlayerReconnection, startAbandonmentCountdown } = require('../game');
+const { 
+  games, 
+  activePlayers, 
+  matchmakingQueue, 
+  checkAndFlagTimeout, 
+  handlePlayerReconnection, 
+  startAbandonmentCountdown,
+  getActivePlayersCount,
+  getActiveGamesCount
+} = require('../game');
 const { finalizeGame } = require('../utils/game-finisher');
 
 const { notifyUserDisconnected } = require('../utils/laravel-notifier');
 
 let lastSyncTime = 0;
+let lastStatsSyncTime = 0;
+const STATS_ROOM = 'site_stats';
 
 // Game Heartbeat Timer: Checks for timeouts every 1s
 setInterval(() => {
@@ -77,6 +88,18 @@ setInterval(() => {
     }
   }
   
+  // Periodic Site Stats Sync (every 10s, only if someone is watching)
+  if (Date.now() - lastStatsSyncTime >= 10000) {
+    const statsRoom = io.sockets.adapter.rooms.get(STATS_ROOM);
+    if (statsRoom && statsRoom.size > 0) {
+      io.to(STATS_ROOM).emit('site_stats', {
+        nbPlayers: getActivePlayersCount(),
+        nbGames: getActiveGamesCount()
+      });
+    }
+    lastStatsSyncTime = Date.now();
+  }
+
   if (Date.now() - lastSyncTime >= 5000) {
     lastSyncTime = Date.now();
   }
@@ -96,6 +119,20 @@ function setupSocketHandlers(io) {
     setupArenaHandlers(socket, io);
     setupTvHandlers(socket, io);
     setupStudyHandlers(socket, io);
+
+    // Site Stats Subscription
+    socket.on('subscribe_site_stats', () => {
+      socket.join(STATS_ROOM);
+      // Push immediate update
+      socket.emit('site_stats', {
+        nbPlayers: getActivePlayersCount(),
+        nbGames: getActiveGamesCount()
+      });
+    });
+
+    socket.on('unsubscribe_site_stats', () => {
+      socket.leave(STATS_ROOM);
+    });
 
     // Global disconnection handler
     socket.on('disconnect', () => {

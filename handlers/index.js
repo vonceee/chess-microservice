@@ -2,6 +2,7 @@ const { setupGameHandlers } = require('./game.handler');
 const { setupArenaHandlers } = require('./arena.handler');
 const { setupTvHandlers } = require('./tv.handler');
 const { setupStudyHandlers } = require('./study.handler');
+const { getGlobalTopGames } = require('../tv');
 const { setIo } = require('../arena');
 const { 
   games, 
@@ -92,9 +93,12 @@ setInterval(() => {
   if (Date.now() - lastStatsSyncTime >= 10000) {
     const statsRoom = io.sockets.adapter.rooms.get(STATS_ROOM);
     if (statsRoom && statsRoom.size > 0) {
+      const topGames = getGlobalTopGames(6);
       io.to(STATS_ROOM).emit('site_stats', {
         nbPlayers: getActivePlayersCount(),
-        nbGames: getActiveGamesCount()
+        nbGames: getActiveGamesCount(),
+        topGames,
+        topGameId: topGames.length > 0 ? topGames[0].gameId : null
       });
     }
     lastStatsSyncTime = Date.now();
@@ -123,10 +127,12 @@ function setupSocketHandlers(io) {
     // Site Stats Subscription
     socket.on('subscribe_site_stats', () => {
       socket.join(STATS_ROOM);
-      // Push immediate update
+      const topGames = getGlobalTopGames(6);
       socket.emit('site_stats', {
         nbPlayers: getActivePlayersCount(),
-        nbGames: getActiveGamesCount()
+        nbGames: getActiveGamesCount(),
+        topGames,
+        topGameId: topGames.length > 0 ? topGames[0].gameId : null
       });
     });
 

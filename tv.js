@@ -126,13 +126,37 @@ function getFeaturedGamesData() {
   return data;
 }
 
-function getFeaturedGameIds() {
-  return [featuredGames.bullet, featuredGames.blitz, featuredGames.rapid].filter(Boolean);
+function getGlobalTopGames(limit = 6) {
+  const allCandidates = [];
+
+  for (const [gameId, game] of games.entries()) {
+    if (game.status === 'active') {
+      const averageRating = ((game.whitePlayer.rating || 1500) + (game.blackPlayer.rating || 1500)) / 2;
+      allCandidates.push({
+        gameId: gameId,
+        white: { 
+          name: game.whitePlayer.name, 
+          rating: game.whitePlayer.rating || 1500
+        },
+        black: { 
+          name: game.blackPlayer.name, 
+          rating: game.blackPlayer.rating || 1500
+        },
+        score: averageRating
+      });
+    }
+  }
+
+  // Sort descending by average rating
+  allCandidates.sort((a, b) => b.score - a.score);
+
+  return allCandidates.slice(0, limit);
 }
 
 module.exports = {
   initTvDirector,
   getFeaturedGamesData,
   getFeaturedGameIds,
+  getGlobalTopGames,
   featuredGames
 };

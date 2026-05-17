@@ -153,6 +153,10 @@ function getGlobalTopGames(limit = 6) {
   return allCandidates.slice(0, limit);
 }
 
+function getFeaturedGameIds() {
+  return Object.values(featuredGames).filter(id => id !== null);
+}
+
 module.exports = {
   initTvDirector,
   getFeaturedGamesData,

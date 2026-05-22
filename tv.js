@@ -142,7 +142,12 @@ function getGlobalTopGames(limit = 6) {
           name: game.blackPlayer.name, 
           rating: game.blackPlayer.rating || 1500
         },
-        score: averageRating
+        score: averageRating,
+        fen: game.fen,
+        turn: game.turn,
+        whiteTimeRemainingMs: game.whiteTimeRemainingMs,
+        blackTimeRemainingMs: game.blackTimeRemainingMs,
+        serverTimestamp: game.lastMoveTimestamp ? game.lastMoveTimestamp.toISOString() : null,
       });
     }
   }

@@ -5,6 +5,7 @@ const { games, activePlayers, createGame } = require('../game');
 const { getEffectiveTimes: getEffectiveTimesClock, sanitizeGame } = require('../utils/clock');
 const { getLegalMoves: getLegalMovesChess } = require('../utils/chess');
 const { handleProcessMove, handleProcessResign } = require('../services/game-logic');
+const { getGlobalTopGames } = require('../tv');
 
 // Health check endpoint
 router.get('/health', (req, res) => {
@@ -72,6 +73,12 @@ router.get('/games/:gameId', (req, res) => {
     ...times,
     legalMoves: getLegalMovesChess(game.fen)
   });
+});
+
+// Get all active games for canvas
+router.get('/active/all', (req, res) => {
+  const activeGames = getGlobalTopGames(24);
+  res.json({ games: activeGames });
 });
 
 // API move

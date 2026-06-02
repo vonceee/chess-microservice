@@ -145,6 +145,31 @@ function setupStudyHandlers(socket, io) {
     console.log(`[Study] Board control revoked in study ${studyId}, returned to host ${study.ownerId}`);
   });
 
+  socket.on('request_move_permission', (data) => {
+    const { studyId, userId, userName } = data;
+    const study = activeStudies.get(String(studyId));
+    if (!study) return;
+
+    io.to(String(studyId)).emit('move_permission_requested', {
+      studyId,
+      userId,
+      userName
+    });
+    console.log(`[Study] Move permission requested in study ${studyId} by user ${userId} (${userName})`);
+  });
+
+  socket.on('decline_move_permission', (data) => {
+    const { studyId, targetUserId } = data;
+    const study = activeStudies.get(String(studyId));
+    if (!study) return;
+
+    io.to(String(studyId)).emit('move_permission_declined', {
+      studyId,
+      targetUserId
+    });
+    console.log(`[Study] Move permission declined in study ${studyId} for target user ${targetUserId}`);
+  });
+
   socket.on('study_delete_node', (data) => {
     const { studyId, chapterId, nodeId } = data;
     const study = activeStudies.get(String(studyId));

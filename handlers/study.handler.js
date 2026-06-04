@@ -58,8 +58,8 @@ function setupStudyHandlers(socket, io) {
       return;
     }
 
-    // Classroom Guard: If a class is active, only the lock holder can move
-    if (study.isClassActive && String(socket.userId) !== String(study.lockHolderId)) {
+    // Classroom Guard: If a class is active, only the lock holder (or the owner) can move
+    if (study.isClassActive && String(socket.userId) !== String(study.lockHolderId) && !isOwner) {
       console.warn(`[Study] Blocked move attempt by ${socket.userId} during active class in room ${studyId}`);
       return;
     }

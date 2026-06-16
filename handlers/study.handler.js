@@ -1,4 +1,5 @@
 const activeStudies = new Map(); // studyId -> { ownerId, currentChapterId, fen, moves, shapes }
+const { activePlayers } = require('../game');
 
 function setupStudyHandlers(socket, io) {
   socket.on('join_study', (data) => {
@@ -263,6 +264,35 @@ function setupStudyHandlers(socket, io) {
   socket.on('leave_study', (studyId) => {
     socket.leave(String(studyId));
     broadcastViewers(io, String(studyId));
+  });
+
+  socket.on('join_call', (data) => {
+    const { studyId } = data;
+    socket.to(String(studyId)).emit('user_joined_call', {
+      userId: socket.userId,
+      userName: socket.userName || 'Anonymous'
+    });
+    console.log(`[Study Video] User ${socket.userId} joined call in study ${studyId}`);
+  });
+
+  socket.on('leave_call', (data) => {
+    const { studyId } = data;
+    socket.to(String(studyId)).emit('user_left_call', {
+      userId: socket.userId
+    });
+    console.log(`[Study Video] User ${socket.userId} left call in study ${studyId}`);
+  });
+
+  socket.on('webrtc_signal', (data) => {
+    const { studyId, targetUserId, signalData } = data;
+    const targetSocketId = activePlayers.get(String(targetUserId));
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('webrtc_signal', {
+        senderUserId: socket.userId,
+        studyId,
+        signalData
+      });
+    }
   });
 
   socket.on('disconnecting', async () => {

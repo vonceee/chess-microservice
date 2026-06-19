@@ -1,4 +1,4 @@
-const { activePlayers } = require('./game');
+const { activePlayers } = require('./active-players');
 
 // Authentication middleware for Socket.io
 function socketAuth(io) {

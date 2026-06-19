@@ -1,116 +1,7 @@
-const { setupGameHandlers } = require('./game.handler');
-const { setupArenaHandlers } = require('./arena.handler');
-const { setupTvHandlers } = require('./tv.handler');
 const { setupStudyHandlers } = require('./study.handler');
-const { getGlobalTopGames } = require('../tv');
-const { setIo } = require('../arena');
-const { 
-  games, 
-  activePlayers, 
-  matchmakingQueue, 
-  checkAndFlagTimeout, 
-  handlePlayerReconnection, 
-  startAbandonmentCountdown,
-  getActivePlayersCount,
-  getActiveGamesCount
-} = require('../game');
-const { finalizeGame } = require('../utils/game-finisher');
-
-const { notifyUserDisconnected } = require('../utils/laravel-notifier');
-
-let lastSyncTime = 0;
-let lastStatsSyncTime = 0;
-const STATS_ROOM = 'site_stats';
-
-// Game Heartbeat Timer: Checks for timeouts every 1s
-setInterval(() => {
-  const server = require('../server'); 
-  const io = server.io; // Get io from server.js
-  if (!io) return;
-
-  for (const [gameId, game] of games.entries()) {
-    if (game.status === 'active') {
-      const tickNow = new Date();
-
-      // Abort logic for inactive starts
-      // First move grace period: Abort if no move within 15s
-      if (game.moves.length < 2 && game.turnStartedAt) {
-        const elapsed = tickNow - game.turnStartedAt;
-        const limitMs = 30000;
-        const remaining = Math.max(0, Math.ceil((limitMs - elapsed) / 1000));
-        
-        // Notify client of remaining time to make first move
-        game.firstMoveCountdown = remaining;
-        io.to(gameId).emit('first_move_countdown', { 
-          gameId, 
-          secondsRemaining: remaining 
-        });
-
-        if (elapsed > limitMs) {
-          game.status = 'aborted';
-          game.termination = 'aborted_server';
-          io.to(gameId).emit('game_ended', { 
-            gameId, 
-            status: 'aborted', 
-            termination: 'aborted_server', 
-            result: null 
-          });
-          finalizeGame(game, io);
-          continue;
-        }
-      }
-
-      if (game.lastMoveTimestamp) {
-        const elapsed = tickNow - game.lastMoveTimestamp;
-        if (game.turn === 'white') {
-          game.whiteTimeRemainingMs = Math.max(0, game.whiteTimeRemainingMs - elapsed);
-        } else {
-          game.blackTimeRemainingMs = Math.max(0, game.blackTimeRemainingMs - elapsed);
-        }
-        game.lastMoveTimestamp = tickNow;
-      }
-
-      if (checkAndFlagTimeout(game)) {
-        finalizeGame(game, io);
-        continue;
-      }
-
-      // Periodic UI Sync (every 5s)
-      const nowMs = Date.now();
-      if (nowMs - lastSyncTime >= 5000) {
-        io.to(gameId).emit('clock_sync', {
-          whiteTimeRemainingMs: game.whiteTimeRemainingMs,
-          blackTimeRemainingMs: game.blackTimeRemainingMs,
-          turn: game.turn,
-          serverTimestamp: game.lastMoveTimestamp ? game.lastMoveTimestamp.toISOString() : null,
-          opponentAwayCountdown: game.opponentAwayCountdown
-        });
-      }
-    }
-  }
-  
-  // Periodic Site Stats Sync (every 10s, only if someone is watching)
-  if (Date.now() - lastStatsSyncTime >= 10000) {
-    const statsRoom = io.sockets.adapter.rooms.get(STATS_ROOM);
-    if (statsRoom && statsRoom.size > 0) {
-      const topGames = getGlobalTopGames(6);
-      io.to(STATS_ROOM).emit('site_stats', {
-        nbPlayers: getActivePlayersCount(),
-        nbGames: getActiveGamesCount(),
-        topGames,
-        topGameId: topGames.length > 0 ? topGames[0].gameId : null
-      });
-    }
-    lastStatsSyncTime = Date.now();
-  }
-
-  if (Date.now() - lastSyncTime >= 5000) {
-    lastSyncTime = Date.now();
-  }
-}, 1000);
+const { activePlayers } = require('../active-players');
 
 function setupSocketHandlers(io) {
-  setIo(io);
   io.on('connection', (socket) => {
     // Basic account tracking
     activePlayers.set(socket.userId, socket.id);
@@ -118,56 +9,16 @@ function setupSocketHandlers(io) {
     // Notify all clients about user presence
     io.emit('presence_update', { userId: socket.userId, online: true });
 
-    // Wire up modular handlers
-    setupGameHandlers(socket, io);
-    setupArenaHandlers(socket, io);
-    setupTvHandlers(socket, io);
+    // Wire up modular handlers (Only Study is kept)
     setupStudyHandlers(socket, io);
-
-    // Site Stats Subscription
-    socket.on('subscribe_site_stats', () => {
-      socket.join(STATS_ROOM);
-      const topGames = getGlobalTopGames(6);
-      socket.emit('site_stats', {
-        nbPlayers: getActivePlayersCount(),
-        nbGames: getActiveGamesCount(),
-        topGames,
-        topGameId: topGames.length > 0 ? topGames[0].gameId : null
-      });
-    });
-
-    socket.on('unsubscribe_site_stats', () => {
-      socket.leave(STATS_ROOM);
-    });
 
     // Global disconnection handler
     socket.on('disconnect', () => {
-      // Remove from matchmaking queue
-      const qIdx = matchmakingQueue.findIndex(p => p.userId === socket.userId);
-      if (qIdx !== -1) matchmakingQueue.splice(qIdx, 1);
-
       // Remove from active players only if this is the active socket for the user
       if (activePlayers.get(socket.userId) === socket.id) {
         activePlayers.delete(socket.userId);
         // Notify all clients about user presence
         io.emit('presence_update', { userId: socket.userId, online: false });
-        // Notify Laravel to cleanup any matchmaking seeks
-        notifyUserDisconnected(socket.userId);
-      }
-
-      // Handle abandonment
-      for (const [gameId, game] of games) {
-        if (game.status === 'active') {
-          let color = null;
-          if (game.whitePlayer.socketId === socket.id) color = 'white';
-          else if (game.blackPlayer.socketId === socket.id) color = 'black';
-
-          if (color) {
-            if (color === 'white') game.whitePlayer.socketId = '';
-            else game.blackPlayer.socketId = '';
-            startAbandonmentCountdown(game, color, io);
-          }
-        }
       }
     });
   });

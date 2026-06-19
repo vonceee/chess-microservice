@@ -1,5 +1,5 @@
 const activeStudies = new Map(); // studyId -> { ownerId, currentChapterId, fen, moves, shapes }
-const { activePlayers } = require('../game');
+const { activePlayers } = require('../active-players');
 
 function setupStudyHandlers(socket, io) {
   socket.on('join_study', (data) => {

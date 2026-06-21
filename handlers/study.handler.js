@@ -21,6 +21,7 @@ function setupStudyHandlers(socket, io) {
         shapes: state?.shapes || [],
         isClassActive: state?.isClassActive || false,
         lockHolderId: state?.lockHolderId || null,
+        classStartedAt: state?.classStartedAt || null,
       };
       
       activeStudies.set(String(studyId), newState);
@@ -88,10 +89,12 @@ function setupStudyHandlers(socket, io) {
 
     study.isClassActive = true;
     study.lockHolderId = String(socket.userId); // Owner has the lock by default
+    study.classStartedAt = new Date().toISOString();
 
     io.to(String(studyId)).emit('class_session_started', {
       isClassActive: true,
-      lockHolderId: study.lockHolderId
+      lockHolderId: study.lockHolderId,
+      classStartedAt: study.classStartedAt
     });
     console.log(`[Study] Class session started for study ${studyId} by host ${socket.userId}`);
   });
@@ -106,10 +109,12 @@ function setupStudyHandlers(socket, io) {
 
     study.isClassActive = false;
     study.lockHolderId = null;
+    study.classStartedAt = null;
 
     io.to(String(studyId)).emit('class_session_ended', {
       isClassActive: false,
-      lockHolderId: null
+      lockHolderId: null,
+      classStartedAt: null
     });
     console.log(`[Study] Class session ended for study ${studyId}`);
   });

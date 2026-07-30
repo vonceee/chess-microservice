@@ -1,12 +1,17 @@
 const activeStudies = new Map(); // studyId -> { ownerId, currentChapterId, fen, moves, shapes }
 const { activePlayers } = require('../active-players');
 
+function cleanFen(fen) {
+  if (!fen) return '';
+  return fen.trim().split(/\s+/).slice(0, 2).join(' ');
+}
+
 function setupStudyHandlers(socket, io) {
   socket.on('join_study', (data) => {
     const { studyId, ownerId, initialState, collaboratorIds } = data;
-    
+
     socket.join(String(studyId));
-    
+
     let state = activeStudies.get(String(studyId));
     const isOwner = String(socket.userId) === String(ownerId);
 
@@ -19,14 +24,16 @@ function setupStudyHandlers(socket, io) {
         fen: initialState?.fen || state?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
         moves: initialState?.moves || state?.moves || [],
         shapes: state?.shapes || [],
+        shapesChapterId: state?.shapesChapterId || null,
+        shapesFen: state?.shapesFen || null,
         isClassActive: state?.isClassActive || false,
         lockHolderId: state?.lockHolderId || null,
         classStartedAt: state?.classStartedAt || null,
       };
-      
+
       activeStudies.set(String(studyId), newState);
       state = newState;
-      
+
       if (isOwner) {
         console.log(`[Study] Owner ${socket.userId} updated state for study ${studyId}`);
       } else {
@@ -38,7 +45,7 @@ function setupStudyHandlers(socket, io) {
     }
 
     socket.emit('study_synced', state);
-    
+
     console.log(`[Study] User ${socket.userId} (${socket.userName}) joined study ${studyId}`);
     broadcastViewers(io, String(studyId));
   });
@@ -51,11 +58,12 @@ function setupStudyHandlers(socket, io) {
       console.warn(`[Study] study_move received for inactive study ${studyId}`);
       return;
     }
-    
+
     const isOwner = String(socket.userId) === String(study.ownerId);
     const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
-    
-    if (!isOwner && !isCollaborator) {
+    const isLockHolder = study.isClassActive && String(socket.userId) === String(study.lockHolderId);
+
+    if (!isOwner && !isCollaborator && !isLockHolder) {
       console.warn(`[Study] Unauthorized move attempt by ${socket.userId} in study ${studyId}`);
       return;
     }
@@ -71,9 +79,12 @@ function setupStudyHandlers(socket, io) {
       study.moves = moves;
     }
 
-    study.fen = fen;
-    study.currentChapterId = chapterId;
-    study.shapes = [];
+    // Clear shapes only if the position/FEN has actually changed
+    if (cleanFen(study.fen) !== cleanFen(fen)) {
+      study.shapes = [];
+      study.shapesChapterId = null;
+      study.shapesFen = null;
+    }
 
     io.to(String(studyId)).emit('study_move_made', { ...data, userId: socket.userId });
     console.log(`[Study] Move made in study ${studyId}, chapter ${chapterId} by ${socket.userId}`);
@@ -179,7 +190,7 @@ function setupStudyHandlers(socket, io) {
   socket.on('study_delete_node', (data) => {
     const { studyId, chapterId, nodeId } = data;
     const study = activeStudies.get(String(studyId));
-    
+
     if (!study) return;
     const isOwner = String(socket.userId) === String(study.ownerId);
     const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
@@ -193,7 +204,7 @@ function setupStudyHandlers(socket, io) {
   socket.on('study_update_comment', (data) => {
     const { studyId, chapterId, nodeId, comment } = data;
     const study = activeStudies.get(String(studyId));
-    
+
     if (!study) return;
     const isOwner = String(socket.userId) === String(study.ownerId);
     const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
@@ -205,31 +216,36 @@ function setupStudyHandlers(socket, io) {
   });
 
   socket.on('study_draw_shapes', (data) => {
-    const { studyId, shapes } = data;
+    const { studyId, shapes, chapterId, fen } = data;
     const study = activeStudies.get(String(studyId));
-    
-    if (!study) return;
-    const isOwner = String(socket.userId) === String(study.ownerId);
-    const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
-    if (!isOwner && !isCollaborator) return;
 
+    if (!study) return;
+
+    console.log(`[Study] Shapes drawn in study ${studyId}, chapter ${chapterId} by ${socket.userId}`);
     study.shapes = shapes;
-    io.to(String(studyId)).emit('study_shapes_drawn', { shapes, userId: socket.userId });
+    study.shapesChapterId = chapterId;
+    study.shapesFen = fen;
+    io.to(String(studyId)).emit('study_shapes_drawn', { shapes, userId: socket.userId, chapterId, fen });
   });
 
   socket.on('study_change_chapter', (data) => {
     const { studyId, chapterId, fen, moves } = data;
     const study = activeStudies.get(String(studyId));
-    
+
     if (!study) return;
     const isOwner = String(socket.userId) === String(study.ownerId);
     const isCollaborator = study.collaboratorIds && study.collaboratorIds.includes(String(socket.userId));
     if (!isOwner && !isCollaborator) return;
 
+    if (String(study.currentChapterId) !== String(chapterId)) {
+      study.shapes = [];
+      study.shapesChapterId = null;
+      study.shapesFen = null;
+    }
+
     study.currentChapterId = chapterId;
     study.fen = fen;
     study.moves = moves;
-    study.shapes = [];
 
     io.to(String(studyId)).emit('study_chapter_changed', { chapterId, fen, moves });
   });
@@ -304,7 +320,7 @@ function setupStudyHandlers(socket, io) {
     for (const room of socket.rooms) {
       if (activeStudies.has(room)) {
         const sockets = await io.in(room).fetchSockets();
-        
+
         // If this was the last person in the room, cleanup the memory
         // (sockets.length <= 1 because the current socket is still in the room while 'disconnecting')
         if (!sockets || sockets.length <= 1) {
@@ -324,10 +340,10 @@ function setupStudyHandlers(socket, io) {
             userId,
             userName
           }));
-          socket.to(room).emit('viewer_list_update', { 
-            studyId: room, 
-            viewers, 
-            count: sockets.length - 1 
+          socket.to(room).emit('viewer_list_update', {
+            studyId: room,
+            viewers,
+            count: sockets.length - 1
           });
         }
       }
@@ -339,7 +355,7 @@ async function broadcastViewers(io, studyId) {
   const roomId = String(studyId);
   try {
     const sockets = await io.in(roomId).fetchSockets();
-    
+
     if (!sockets) {
       io.to(roomId).emit('viewer_list_update', { studyId, viewers: [], count: 0 });
       return;
@@ -358,10 +374,10 @@ async function broadcastViewers(io, studyId) {
       userId,
       userName
     }));
-    io.to(roomId).emit('viewer_list_update', { 
-      studyId, 
-      viewers, 
-      count: sockets.length 
+    io.to(roomId).emit('viewer_list_update', {
+      studyId,
+      viewers,
+      count: sockets.length
     });
   } catch (err) {
     console.error('[Study] broadcastViewers error:', err);

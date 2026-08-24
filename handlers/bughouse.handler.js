@@ -449,7 +449,10 @@ function setupBughouseHandlers(socket, io) {
   // ── Disconnect ────────────────────────────────────────────────────────────
 
   socket.on('disconnect', () => {
-    // If this player is in an active game, the other team wins by forfeit
+    // 1. Clean up lobby and matchmaking queue state
+    leaveCurrentLobby(socket, io);
+
+    // 2. If this player is in an active game, the other team wins by forfeit
     const myUserId = String(socket.userId);
 
     for (const [gameId, game] of bughouseGames) {

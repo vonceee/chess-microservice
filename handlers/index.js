@@ -1,4 +1,6 @@
 const { setupStudyHandlers } = require('./study.handler');
+const { setupBughouseHandlers } = require('./bughouse.handler');
+const { setupGameHandlers } = require('./game.handler');
 const { activePlayers } = require('../active-players');
 
 function setupSocketHandlers(io) {
@@ -9,10 +11,13 @@ function setupSocketHandlers(io) {
     // Notify all clients about user presence
     io.emit('presence_update', { userId: socket.userId, online: true });
 
-    // Wire up modular handlers (Only Study is kept)
+    // Wire up modular handlers
     setupStudyHandlers(socket, io);
+    setupBughouseHandlers(socket, io);
+    setupGameHandlers(socket, io);
 
     // Global disconnection handler
+
     socket.on('disconnect', () => {
       // Remove from active players only if this is the active socket for the user
       if (activePlayers.get(socket.userId) === socket.id) {

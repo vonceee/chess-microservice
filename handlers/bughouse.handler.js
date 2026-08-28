@@ -92,6 +92,30 @@ function checkGameOverOnChess(chess, board, game) {
 /**
  * End a game: stop the clock, persist winner, emit game_over to all 4 clients.
  */
+function getActiveGamesList() {
+  const list = [];
+  for (const game of bughouseGames.values()) {
+    if (game.status === 'active') {
+      list.push({
+        gameId: game.gameId,
+        teamA: {
+          captainName: game.teamA.captainName,
+          partnerName: game.teamA.partnerName,
+        },
+        teamB: {
+          captainName: game.teamB.captainName,
+          partnerName: game.teamB.partnerName,
+        },
+      });
+    }
+  }
+  return list;
+}
+
+function broadcastActiveGames(io) {
+  io.to('bughouse_global').emit('bughouse_active_games', getActiveGamesList());
+}
+
 function endBughouseGame(io, game, winner, reason) {
   if (game.status === 'ended') return;
   game.status = 'ended';
@@ -104,6 +128,7 @@ function endBughouseGame(io, game, winner, reason) {
 
   io.to(`bughouse_game_${game.gameId}`).emit('bughouse_game_over', { winner, reason });
   console.log(`[Bughouse] Game ${game.gameId} ended — ${winner}: ${reason}`);
+  broadcastActiveGames(io);
 }
 
 // ── Handler setup ─────────────────────────────────────────────────────────────
@@ -140,6 +165,9 @@ function setupBughouseHandlers(socket, io) {
     }
   });
   socket.on('bughouse_join', () => {
+    socket.join('bughouse_global');
+    socket.emit('bughouse_active_games', getActiveGamesList());
+
     // Sync lobby state
     const lobbyId = activePlayersLobby.get(String(socket.userId));
     if (lobbyId) {
@@ -423,6 +451,35 @@ function setupBughouseHandlers(socket, io) {
     if (over) {
       endBughouseGame(io, game, over.winner, over.reason);
     }
+  });
+
+  // ── Spectating ─────────────────────────────────────────────────────────────
+
+  socket.on('bughouse_spectate', (data) => {
+    const { gameId } = data;
+    const game = bughouseGames.get(gameId);
+    if (!game || game.status !== 'active') {
+      socket.emit('bughouse_error', 'Game is not active or does not exist.');
+      return;
+    }
+    socket.join(`bughouse_game_${gameId}`);
+    socket.emit('bughouse_game_start', {
+      gameId,
+      colors: game.colors,
+      teamA: game.teamA,
+      teamB: game.teamB,
+      boardAFen: game.chessA.fen(),
+      boardBFen: game.chessB.fen(),
+      pockets: game.pockets,
+      clocks: game.clocks,
+      timeControl: DEFAULT_TIME,
+      isSpectator: true,
+    });
+  });
+
+  socket.on('bughouse_leave_spectate', (data) => {
+    const { gameId } = data;
+    socket.leave(`bughouse_game_${gameId}`);
   });
 
   // 12. Player resigns
@@ -710,6 +767,7 @@ function checkAndMatchLobbies(io) {
   }, 5500); // 5.5 s delay matches the client-side countdown
 
   console.log(`[Bughouse] Game ${gameId} started. Colors: WhiteA=${whiteA_id} BlackA=${blackA_id} WhiteB=${whiteB_id} BlackB=${blackB_id}`);
+  broadcastActiveGames(io);
 }
 
 module.exports = { setupBughouseHandlers };

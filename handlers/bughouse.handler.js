@@ -126,7 +126,7 @@ function endBughouseGame(io, game, winner, reason) {
     game.clockInterval = null;
   }
 
-  io.to(`bughouse_game_${game.gameId}`).emit('bughouse_game_over', { winner, reason });
+  io.to(`bughouse_game_${game.gameId}`).emit('bughouse_game_over', { gameId: game.gameId, winner, reason });
   console.log(`[Bughouse] Game ${game.gameId} ended — ${winner}: ${reason}`);
   broadcastActiveGames(io);
 }
@@ -290,6 +290,7 @@ function setupBughouseHandlers(socket, io) {
     io.to(`bughouse_lobby_${lobbyId}`).emit('bughouse_lobby_sync', lobby);
     console.log(`[Bughouse] User ${socket.userId} joined lobby ${lobbyId} as partner`);
   });
+
 
   // 5. Invitee rejects or Captain cancels the invite
   socket.on('bughouse_reject_invite', (data) => {
@@ -787,7 +788,7 @@ function checkAndMatchLobbies(io) {
     if (turnB === 'w') { clocks.B_W = Math.max(0, clocks.B_W - 1); }
     else               { clocks.B_B = Math.max(0, clocks.B_B - 1); }
 
-    io.to(gameRoom).emit('bughouse_clock_tick', { clocks });
+    io.to(gameRoom).emit('bughouse_clock_tick', { gameId: game.gameId, clocks });
 
     // Flag check
     if (clocks.A_W <= 0) { endBughouseGame(io, game, 'Team B', 'Board A White flagged'); }

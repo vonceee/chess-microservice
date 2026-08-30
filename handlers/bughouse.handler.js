@@ -215,6 +215,7 @@ function setupBughouseHandlers(socket, io) {
         partner: null,
         status:  'waiting',
         invitees: new Set(),
+        inviteeList: [],
       };
       bughouseLobbies.set(lobbyId, lobby);
       activePlayersLobby.set(String(socket.userId), lobbyId);
@@ -225,6 +226,15 @@ function setupBughouseHandlers(socket, io) {
       lobby.invitees = new Set();
     }
     lobby.invitees.add(String(receiverId));
+
+    if (!lobby.inviteeList) {
+      lobby.inviteeList = [];
+    }
+    if (!lobby.inviteeList.some(i => String(i.userId) === String(receiverId))) {
+      lobby.inviteeList.push({ userId: String(receiverId), userName: receiverName });
+    }
+
+    io.to(`bughouse_lobby_${lobbyId}`).emit('bughouse_lobby_sync', lobby);
 
     const receiverSocketId = activePlayers.get(String(receiverId));
     if (receiverSocketId) {
@@ -269,6 +279,9 @@ function setupBughouseHandlers(socket, io) {
       }
       lobby.invitees.clear();
     }
+    if (lobby.inviteeList) {
+      lobby.inviteeList = [];
+    }
 
     lobby.partner = { userId: socket.userId, userName: socket.userName, rating: 1600 };
     activePlayersLobby.set(String(socket.userId), String(lobbyId));
@@ -282,8 +295,14 @@ function setupBughouseHandlers(socket, io) {
   socket.on('bughouse_reject_invite', (data) => {
     const { lobbyId } = data;
     const lobby = bughouseLobbies.get(String(lobbyId));
-    if (lobby && lobby.invitees) {
-      lobby.invitees.delete(String(socket.userId));
+    if (lobby) {
+      if (lobby.invitees) {
+        lobby.invitees.delete(String(socket.userId));
+      }
+      if (lobby.inviteeList) {
+        lobby.inviteeList = lobby.inviteeList.filter(i => String(i.userId) !== String(socket.userId));
+      }
+      io.to(`bughouse_lobby_${lobbyId}`).emit('bughouse_lobby_sync', lobby);
     }
 
     const captainSocketId = activePlayers.get(String(lobbyId));
@@ -506,8 +525,17 @@ function setupBughouseHandlers(socket, io) {
   // ── Disconnect ────────────────────────────────────────────────────────────
 
   socket.on('disconnect', () => {
-    // 1. Clean up lobby and matchmaking queue state
-    leaveCurrentLobby(socket, io);
+    const userId = String(socket.userId);
+
+    // 1. Clean up lobby and matchmaking queue state with a 15s grace period to allow reloads
+    setTimeout(() => {
+      const activeSocketId = activePlayers.get(userId);
+      if (!activeSocketId) {
+        leaveCurrentLobby(socket, io);
+      } else {
+        console.log(`[Bughouse] Captain/User ${userId} reconnected. Lobby preserved.`);
+      }
+    }, 15000);
 
     // 2. If this player is in an active game, the other team wins by forfeit
     const myUserId = String(socket.userId);
@@ -559,6 +587,9 @@ function leaveCurrentLobby(socket, io) {
         }
       }
       lobby.invitees.clear();
+    }
+    if (lobby.inviteeList) {
+      lobby.inviteeList = [];
     }
 
     if (lobby.partner) {

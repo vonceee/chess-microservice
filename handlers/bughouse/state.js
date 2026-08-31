@@ -8,6 +8,8 @@ const activePlayersLobby = new Map();
 const bughouseGames = new Map();
 /** Quick lookup: userId → gameId */
 const activePlayerGames = new Map();
+/** gameId → rematch state */
+const bughouseRematches = new Map();
 
 module.exports = {
   bughouseLobbies,
@@ -15,4 +17,5 @@ module.exports = {
   activePlayersLobby,
   bughouseGames,
   activePlayerGames,
+  bughouseRematches,
 };

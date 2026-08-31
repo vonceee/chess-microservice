@@ -1,5 +1,5 @@
 const { activePlayers } = require('../../active-players');
-const { bughouseGames, bughouseLobbies, bughouseQueue, activePlayersLobby, activePlayerGames } = require('./state');
+const { bughouseGames, bughouseLobbies, bughouseQueue, activePlayersLobby, activePlayerGames, bughouseRematches } = require('./state');
 
 function emptyPocket() {
   return { p: 0, n: 0, b: 0, r: 0, q: 0 };
@@ -119,6 +119,25 @@ function endBughouseGame(io, game, winner, reason) {
 
   bughouseGames.delete(game.gameId);
 
+  // AI-GENERATED WORKAROUND: Initialize rematch offer record with 90-second TTL to prevent memory leaks.
+  const gameId = game.gameId;
+  const timeoutId = setTimeout(() => {
+    if (bughouseRematches.has(gameId)) {
+      bughouseRematches.delete(gameId);
+      io.to(`bughouse_game_${gameId}`).emit('bughouse_rematch_cancelled', { gameId });
+      console.log(`[Bughouse] Rematch offer expired for game ${gameId}`);
+    }
+  }, 90000);
+
+  bughouseRematches.set(gameId, {
+    gameId,
+    lobbyId1: game.teamA.captainId,
+    lobbyId2: game.teamB.captainId,
+    previousColors: game.colors,
+    offers: new Set(),
+    timeoutId,
+  });
+
   io.to(`bughouse_game_${game.gameId}`).emit('bughouse_game_over', { gameId: game.gameId, winner, reason });
   console.log(`[Bughouse] Game ${game.gameId} ended — ${winner}: ${reason}`);
   broadcastActiveGames(io);
@@ -128,6 +147,18 @@ function leaveCurrentLobby(socket, io) {
   const userId = String(socket.userId);
   const lobbyId = activePlayersLobby.get(userId);
   if (!lobbyId) return;
+
+  // AI-GENERATED WORKAROUND: Cancel and clean up any pending rematches associated with the leaving lobby.
+  for (const [gameId, rematch] of bughouseRematches.entries()) {
+    if (rematch.lobbyId1 === lobbyId || rematch.lobbyId2 === lobbyId) {
+      if (rematch.timeoutId) {
+        clearTimeout(rematch.timeoutId);
+      }
+      io.to(`bughouse_game_${gameId}`).emit('bughouse_rematch_cancelled', { gameId });
+      bughouseRematches.delete(gameId);
+      console.log(`[Bughouse] Rematch for game ${gameId} cancelled because lobby ${lobbyId} left.`);
+    }
+  }
 
   const lobby = bughouseLobbies.get(lobbyId);
   if (!lobby) return;

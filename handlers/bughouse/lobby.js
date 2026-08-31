@@ -40,6 +40,11 @@ function registerLobbyHandlers(socket, io) {
     const { receiverId, receiverName } = data;
     const lobbyId = String(socket.userId);
 
+    if (String(receiverId) === String(socket.userId)) {
+      socket.emit('bughouse_error', 'You cannot invite yourself.');
+      return;
+    }
+
     let lobby = bughouseLobbies.get(lobbyId);
     if (!lobby) {
       lobby = {

@@ -27,14 +27,42 @@ function registerGameplayHandlers(socket, io) {
       pocketUpdate = { board, capturedBy: move.color, piece };
     }
 
+    const fenString = chess.fen();
+    const parts = fenString.split(' ');
+    const fullmove = parseInt(parts[5], 10) || 1;
+    const turn = parts[1];
+    const moveNo = move.color === 'w' ? fullmove : (turn === 'w' ? fullmove - 1 : fullmove);
+
+    const remainingTime = board === 'A'
+      ? (move.color === 'w' ? game.clocks.A_W : game.clocks.A_B)
+      : (move.color === 'w' ? game.clocks.B_W : game.clocks.B_B);
+
+    if (!game.movesHistory) {
+      game.movesHistory = [];
+    }
+
+    const moveEntry = {
+      id: `${gameId}_${board}_${game.movesHistory.length}`,
+      board,
+      moveColor: move.color,
+      moveNo,
+      san: move.san,
+      fen: fenString,
+      playerName: socket.userName || 'Unknown',
+      remainingTime,
+      timestamp: Date.now(),
+    };
+    game.movesHistory.push(moveEntry);
+
     io.to(`bughouse_game_${gameId}`).emit('bughouse_move_broadcast', {
       gameId,
       board,
-      fen: chess.fen(),
+      fen: fenString,
       move,
       pocketUpdate,
       pockets: game.pockets,
       senderId: myUserId,
+      moveEntry,
     });
 
     const over = checkGameOverOnChess(chess, board, game);
@@ -72,6 +100,32 @@ function registerGameplayHandlers(socket, io) {
 
     const moveSan = `${piece.toUpperCase() === 'P' ? '' : piece.toUpperCase()}@${square}`;
 
+    const parts = newFen.split(' ');
+    const fullmove = parseInt(parts[5], 10) || 1;
+    const turn = parts[1];
+    const moveNo = color === 'w' ? fullmove : (turn === 'w' ? fullmove - 1 : fullmove);
+
+    const remainingTime = board === 'A'
+      ? (color === 'w' ? game.clocks.A_W : game.clocks.A_B)
+      : (color === 'w' ? game.clocks.B_W : game.clocks.B_B);
+
+    if (!game.movesHistory) {
+      game.movesHistory = [];
+    }
+
+    const moveEntry = {
+      id: `${gameId}_${board}_${game.movesHistory.length}`,
+      board,
+      moveColor: color,
+      moveNo,
+      san: moveSan,
+      fen: newFen,
+      playerName: socket.userName || 'Unknown',
+      remainingTime,
+      timestamp: Date.now(),
+    };
+    game.movesHistory.push(moveEntry);
+
     io.to(`bughouse_game_${gameId}`).emit('bughouse_move_broadcast', {
       gameId,
       board,
@@ -80,6 +134,7 @@ function registerGameplayHandlers(socket, io) {
       pocketUpdate: null,
       pockets: game.pockets,
       senderId: myUserId,
+      moveEntry,
     });
 
     const over = checkGameOverOnChess(chess, board, game);

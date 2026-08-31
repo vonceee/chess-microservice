@@ -269,6 +269,7 @@ function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
     clockInterval: null,
     disconnectedPlayers: {},
     reconnectGraceMs: 45000,
+    movesHistory: [],
   };
 
   bughouseGames.set(gameId, game);
@@ -294,6 +295,7 @@ function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
     pockets: game.pockets,
     clocks: initialClocks,
     timeControl: DEFAULT_TIME,
+    movesHistory: [],
   };
 
   for (const uid of allUserIds) {

@@ -28,6 +28,7 @@ function registerSpectatorHandlers(socket, io) {
       clocks: game.clocks,
       timeControl: DEFAULT_TIME,
       isSpectator: true,
+      movesHistory: game.movesHistory || [],
     });
   });
 

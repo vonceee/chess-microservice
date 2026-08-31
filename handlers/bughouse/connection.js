@@ -53,6 +53,7 @@ function handleJoin(socket, io) {
         timeControl: DEFAULT_TIME,
         yourBoard: game.colors[myUserId].board,
         yourColor: game.colors[myUserId].color,
+        movesHistory: game.movesHistory || [],
       });
 
       console.log(`[Bughouse] Active game player ${myUserId} reconnected via bughouse_join. Synced and rejoined room.`);

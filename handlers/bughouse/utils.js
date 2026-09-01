@@ -119,6 +119,20 @@ function endBughouseGame(io, game, winner, reason) {
 
   bughouseGames.delete(game.gameId);
 
+  // Reset participating team lobbies status back to 'waiting'
+  if (game.teamA && game.teamA.captainId) {
+    const lobbyA = bughouseLobbies.get(String(game.teamA.captainId));
+    if (lobbyA) {
+      lobbyA.status = 'waiting';
+    }
+  }
+  if (game.teamB && game.teamB.captainId) {
+    const lobbyB = bughouseLobbies.get(String(game.teamB.captainId));
+    if (lobbyB) {
+      lobbyB.status = 'waiting';
+    }
+  }
+
   // AI-GENERATED WORKAROUND: Initialize rematch offer record with 90-second TTL to prevent memory leaks.
   const gameId = game.gameId;
   const timeoutId = setTimeout(() => {

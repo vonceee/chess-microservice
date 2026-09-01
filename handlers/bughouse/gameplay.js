@@ -161,6 +161,32 @@ function registerGameplayHandlers(socket, io) {
 
     endBughouseGame(io, game, winner, `${socket.userName} resigned`);
   });
+
+  socket.on('bughouse_offer_draw', (data) => {
+    const { gameId } = data;
+    const game = bughouseGames.get(gameId);
+    if (!game || game.status !== 'active') return;
+
+    const myUserId = String(socket.userId);
+    const colorInfo = game.colors[myUserId];
+    if (!colorInfo) return;
+
+    if (!game.drawOffers) game.drawOffers = new Set();
+    game.drawOffers.add(myUserId);
+
+    // Broadcast the draw offer to all players in the game
+    io.to(`bughouse_game_${gameId}`).emit('bughouse_draw_offered', {
+      gameId,
+      offeredBy: socket.userName || myUserId,
+    });
+
+    // If all 4 players have offered draw, end as draw
+    const allPlayerIds = Object.keys(game.colors);
+    const allAccepted = allPlayerIds.every((uid) => game.drawOffers.has(uid));
+    if (allAccepted) {
+      endBughouseGame(io, game, 'Draw', 'Draw by mutual agreement');
+    }
+  });
 }
 
 module.exports = { registerGameplayHandlers };

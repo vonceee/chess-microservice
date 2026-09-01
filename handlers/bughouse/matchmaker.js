@@ -310,12 +310,12 @@ function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
   }
 
   io.to(`bughouse_lobby_${lobbyId1}`).emit('bughouse_matched', {
-    opponent1: { name: teamB_captainName, rating: 1600 },
-    opponent2: { name: teamB_partnerName, rating: 1600 },
+    opponent1: { name: lobby2.captain.userName, rating: 1600 },
+    opponent2: { name: lobby2.partner.userName, rating: 1600 },
   });
   io.to(`bughouse_lobby_${lobbyId2}`).emit('bughouse_matched', {
-    opponent1: { name: teamA_captainName, rating: 1600 },
-    opponent2: { name: teamA_partnerName, rating: 1600 },
+    opponent1: { name: lobby1.captain.userName, rating: 1600 },
+    opponent2: { name: lobby1.partner.userName, rating: 1600 },
   });
 
   setTimeout(() => {

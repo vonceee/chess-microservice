@@ -27,6 +27,7 @@ function registerLobbyHandlers(socket, io) {
       captain: { userId: socket.userId, userName: socket.userName, rating: 1600 },
       partner: null,
       status: 'waiting',
+      variant: 'cannibal',
     };
 
     bughouseLobbies.set(lobbyId, lobby);
@@ -34,6 +35,14 @@ function registerLobbyHandlers(socket, io) {
     socket.join(`bughouse_lobby_${lobbyId}`);
     socket.emit('bughouse_lobby_sync', lobby);
     console.log(`[Bughouse] Lobby created by captain ${socket.userId}`);
+  });
+
+  socket.on('bughouse_set_variant', (data) => {
+    const lobbyId = String(socket.userId);
+    const lobby = bughouseLobbies.get(lobbyId);
+    if (!lobby || String(lobby.captain.userId) !== String(socket.userId)) return;
+    lobby.variant = data.variant === 'standard' ? 'standard' : 'cannibal';
+    io.to(`bughouse_lobby_${lobbyId}`).emit('bughouse_lobby_sync', lobby);
   });
 
   socket.on('bughouse_invite_player', (data) => {

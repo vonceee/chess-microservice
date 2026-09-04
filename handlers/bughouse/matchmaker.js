@@ -254,9 +254,11 @@ function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
   const chessB = new Chess();
 
   const initialClocks = { A_W: DEFAULT_TIME, A_B: DEFAULT_TIME, B_W: DEFAULT_TIME, B_B: DEFAULT_TIME };
+  const variant = lobby1.variant || lobby2.variant || 'cannibal';
 
   const game = {
     gameId,
+    variant,
     teamA: { captainId: teamA_captainId, partnerId: teamA_partnerId, captainName: teamA_captainName, partnerName: teamA_partnerName },
     teamB: { captainId: teamB_captainId, partnerId: teamB_partnerId, captainName: teamB_captainName, partnerName: teamB_partnerName },
     colors,
@@ -287,6 +289,7 @@ function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
 
   const startPayload = {
     gameId,
+    variant,
     colors,
     teamA: { captainName: teamA_captainName, partnerId: teamA_partnerId, partnerName: teamA_partnerName, captainId: teamA_captainId },
     teamB: { captainName: teamB_captainName, partnerId: teamB_partnerId, partnerName: teamB_partnerName, captainId: teamB_captainId },

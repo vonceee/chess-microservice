@@ -1,9 +1,28 @@
 const { bughouseGames } = require('./state');
 const { applyDropToChess, transferCapture, checkGameOverOnChess, endBughouseGame } = require('./utils');
+const { executeCannibalPromotion, getCannibalAvailability } = require('./bughouse-promotion-rules');
 
 function registerGameplayHandlers(socket, io) {
+  socket.on('bughouse_get_cannibal_availability', (data) => {
+    const { gameId, board } = data;
+    const game = bughouseGames.get(gameId);
+    if (!game || game.status !== 'active') return;
+
+    const myUserId = String(socket.userId);
+    const colorInfo = game.colors[myUserId];
+    if (!colorInfo || colorInfo.board !== board) return;
+
+    const availability = getCannibalAvailability(game, board, colorInfo.color);
+    socket.emit('bughouse_cannibal_availability_response', {
+      gameId,
+      board,
+      color: colorInfo.color,
+      availability,
+    });
+  });
+
   socket.on('bughouse_move', (data) => {
-    const { gameId, board, move, fen } = data;
+    const { gameId, board, move, fen, requisition } = data;
     const game = bughouseGames.get(gameId);
     if (!game || game.status !== 'active') return;
 
@@ -16,6 +35,48 @@ function registerGameplayHandlers(socket, io) {
     if (chess.turn() !== colorInfo.color) {
       console.warn(`[Bughouse] Out-of-turn move attempt by ${myUserId}`);
       return;
+    }
+
+    const isPromotion = (move.flags && move.flags.includes('p')) || !!move.promotion;
+    const isCannibal = (game.variant || 'cannibal') === 'cannibal';
+    let cannibalResult = null;
+
+    if (isPromotion && isCannibal) {
+      const promotionPiece = move.promotion || 'q';
+      cannibalResult = executeCannibalPromotion(game, board, colorInfo.color, promotionPiece, requisition);
+
+      if (!cannibalResult.success) {
+        if (cannibalResult.reason === 'REQUISITION_TARGET_STALE' || cannibalResult.reason === 'REQUISITION_POCKET_EMPTY') {
+          socket.emit('bughouse_requisition_stale', {
+            gameId,
+            code: cannibalResult.reason,
+            message: cannibalResult.error || 'Target piece moved! Reselect your piece.',
+            board,
+            targetBoard: cannibalResult.targetBoard,
+            freshFen: cannibalResult.freshFen,
+            fenA: game.chessA.fen(),
+            fenB: game.chessB.fen(),
+            pockets: game.pockets,
+          });
+          return;
+        }
+
+        socket.emit('bughouse_error', cannibalResult.error || 'Cannibal promotion failed.');
+        // Re-sync authoritative state to promoting player to cancel client-side optimistic move
+        socket.emit('bughouse_move_broadcast', {
+          gameId,
+          board,
+          fen: chess.fen(),
+          fenA: game.chessA.fen(),
+          fenB: game.chessB.fen(),
+          move: null,
+          pocketUpdate: null,
+          pockets: game.pockets,
+          plucked: null,
+          senderId: 'server_rollback',
+        });
+        return;
+      }
     }
 
     chess.load(fen);
@@ -58,9 +119,12 @@ function registerGameplayHandlers(socket, io) {
       gameId,
       board,
       fen: fenString,
+      fenA: game.chessA.fen(),
+      fenB: game.chessB.fen(),
       move,
       pocketUpdate,
       pockets: game.pockets,
+      plucked: cannibalResult ? cannibalResult.plucked : null,
       senderId: myUserId,
       moveEntry,
     });
@@ -130,9 +194,12 @@ function registerGameplayHandlers(socket, io) {
       gameId,
       board,
       fen: newFen,
+      fenA: game.chessA.fen(),
+      fenB: game.chessB.fen(),
       move: { san: moveSan, flags: 'd', color, captured: null },
       pocketUpdate: null,
       pockets: game.pockets,
+      plucked: null,
       senderId: myUserId,
       moveEntry,
     });

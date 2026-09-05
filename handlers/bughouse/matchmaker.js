@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const Chess = require('chess.js').Chess;
 const { activePlayers } = require('../../active-players');
-const { bughouseLobbies, bughouseQueue, bughouseGames, activePlayerGames, bughouseRematches, declinedLobbies } = require('./state');
+const { bughouseLobbies, bughouseQueue, bughouseGames, activePlayerGames, bughouseRematches, declinedLobbies, activePlayersLobby } = require('./state');
 const { emptyPocket, endBughouseGame, broadcastActiveGames } = require('./utils');
 
 const DEFAULT_TIME = 300;
@@ -37,15 +37,39 @@ function registerMatchmakerHandlers(socket, io) {
     }
   });
 
+  /**
+   * Cancels matchmaking queue for the current lobby.
+   * 
+   * WHY: Enables both lobby host (captain) and teammate (partner) to abort matchmaking search
+   *      without forcing the partner to abandon/leave the lobby.
+   */
   socket.on('bughouse_cancel_queue', () => {
-    const lobbyId = String(socket.userId);
-    const lobby = bughouseLobbies.get(lobbyId);
+    const userId = String(socket.userId);
+    let lobbyId = activePlayersLobby.get(userId) || userId;
+    let lobby = bughouseLobbies.get(lobbyId);
+
+    if (!lobby) {
+      for (const [id, l] of bughouseLobbies.entries()) {
+        if (String(l.captain?.userId) === userId || String(l.partner?.userId) === userId) {
+          lobbyId = id;
+          lobby = l;
+          break;
+        }
+      }
+    }
 
     if (lobby && lobby.status === 'queued') {
-      lobby.status = 'waiting';
-      bughouseQueue.delete(lobbyId);
-      io.to(`bughouse_lobby_${lobbyId}`).emit('bughouse_lobby_sync', lobby);
-      // console.log(`[Bughouse] Lobby ${lobbyId} left matchmaking queue`);
+      const isParticipant = String(lobby.captain?.userId) === userId || String(lobby.partner?.userId) === userId;
+      if (isParticipant) {
+        lobby.status = 'waiting';
+        bughouseQueue.delete(lobbyId);
+        io.to(`bughouse_lobby_${lobbyId}`).emit('bughouse_lobby_sync', lobby);
+        io.to(`bughouse_lobby_${lobbyId}`).emit('bughouse_queue_cancelled', {
+          cancelledByUserId: userId,
+          cancelledByName: socket.userName,
+        });
+        console.log(`[Bughouse] Matchmaking search cancelled by user ${socket.userName} (${userId}) for lobby ${lobbyId}`);
+      }
     }
   });
 

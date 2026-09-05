@@ -1,6 +1,7 @@
+const crypto = require('crypto');
 const Chess = require('chess.js').Chess;
 const { activePlayers } = require('../../active-players');
-const { bughouseLobbies, bughouseQueue, bughouseGames, activePlayerGames, bughouseRematches } = require('./state');
+const { bughouseLobbies, bughouseQueue, bughouseGames, activePlayerGames, bughouseRematches, declinedLobbies } = require('./state');
 const { emptyPocket, endBughouseGame, broadcastActiveGames } = require('./utils');
 
 const DEFAULT_TIME = 300;
@@ -10,24 +11,27 @@ function registerMatchmakerHandlers(socket, io) {
     const lobbyId = String(socket.userId);
     const lobby = bughouseLobbies.get(lobbyId);
 
-    // Allow matched lobbies to join queue (e.g. after a game has ended)
     if (lobby && lobby.partner && (lobby.status === 'waiting' || lobby.status === 'matched')) {
-      // AI-GENERATED WORKAROUND: Cancel and clean up any pending rematches if this lobby queues up.
       for (const [gameId, rematch] of bughouseRematches.entries()) {
         if (rematch.lobbyId1 === lobbyId || rematch.lobbyId2 === lobbyId) {
-          if (rematch.timeoutId) {
-            clearTimeout(rematch.timeoutId);
+          if (rematch.offerTimeoutId) {
+            clearTimeout(rematch.offerTimeoutId);
           }
-          io.to(`bughouse_game_${gameId}`).emit('bughouse_rematch_cancelled', { gameId });
+          if (rematch.silentCleanupId) {
+            clearTimeout(rematch.silentCleanupId);
+          }
+          if (rematch.offers.size > 0) {
+            io.to(`bughouse_game_${gameId}`).emit('bughouse_rematch_cancelled', { gameId, reason: 'joined_queue' });
+          }
           bughouseRematches.delete(gameId);
-          console.log(`[Bughouse] Rematch cancelled for game ${gameId} as lobby ${lobbyId} joined public queue.`);
+          // console.log(`[Bughouse] Rematch for game ${gameId} cleaned up as lobby ${lobbyId} joined public queue.`);
         }
       }
 
       lobby.status = 'queued';
       bughouseQueue.add(lobbyId);
       io.to(`bughouse_lobby_${lobbyId}`).emit('bughouse_lobby_sync', lobby);
-      console.log(`[Bughouse] Lobby ${lobbyId} joined matchmaking queue`);
+      // console.log(`[Bughouse] Lobby ${lobbyId} joined matchmaking queue`);
 
       checkAndMatchLobbies(io);
     }
@@ -41,76 +45,241 @@ function registerMatchmakerHandlers(socket, io) {
       lobby.status = 'waiting';
       bughouseQueue.delete(lobbyId);
       io.to(`bughouse_lobby_${lobbyId}`).emit('bughouse_lobby_sync', lobby);
-      console.log(`[Bughouse] Lobby ${lobbyId} left matchmaking queue`);
+      // console.log(`[Bughouse] Lobby ${lobbyId} left matchmaking queue`);
     }
   });
 
-  // AI-GENERATED WORKAROUND: Handle the bughouse_offer_rematch event from team captains.
-  /**
-   * Handles rematch offers from players at the end of a game.
-   * 
-   * WHY: Enables O(1) checks to match the same two teams immediately, 
-   *      bypassing the random matchmaking queue.
-   */
-  socket.on('bughouse_offer_rematch', (data) => {
-    const { gameId } = data;
+  function broadcastRematchEvent(io, rematch, eventName, payload) {
+    if (!rematch) return;
+    const gameId = rematch.gameId;
+
+    // console.log(`[Bughouse Rematch] broadcastRematchEvent: ${eventName}`, {
+    //   gameId,
+    //   lobby1: rematch.lobbyId1,
+    //   lobby2: rematch.lobbyId2,
+    //   offers: payload.offers,
+    // });
+
+    io.to(`bughouse_game_${gameId}`).emit(eventName, payload);
+
+    if (rematch.lobbyId1) io.to(`bughouse_lobby_${rematch.lobbyId1}`).emit(eventName, payload);
+    if (rematch.lobbyId2) io.to(`bughouse_lobby_${rematch.lobbyId2}`).emit(eventName, payload);
+
+    const allPlayerIds = Array.from(new Set([
+      ...(rematch.allPlayers || []),
+      ...(rematch.teamAPlayers || []),
+      ...(rematch.teamBPlayers || []),
+      rematch.lobbyId1,
+      rematch.lobbyId2,
+    ])).filter(Boolean).map(String);
+
+    for (const pId of allPlayerIds) {
+      const sId = activePlayers.get(pId) || activePlayers.get(Number(pId));
+      if (sId) {
+        io.to(sId).emit(eventName, payload);
+      }
+    }
+
+    if (io.sockets && io.sockets.sockets) {
+      try {
+        const socketEntries = typeof io.sockets.sockets.entries === 'function'
+          ? Array.from(io.sockets.sockets.entries())
+          : Object.entries(io.sockets.sockets);
+
+        for (const [socketId, s] of socketEntries) {
+          const sUid = s.userId || (s.data && s.data.userId);
+          if (sUid && allPlayerIds.includes(String(sUid))) {
+            s.join(`bughouse_game_${gameId}`);
+            s.emit(eventName, payload);
+            console.log(`[Bughouse Rematch] Delivered ${eventName} directly to user ${sUid} on socket ${socketId}`);
+          }
+        }
+      } catch (err) {
+        console.error('[Bughouse Rematch] Error during socket traversal:', err);
+      }
+    }
+  }
+
+  function handleRematchYes(socket, io, data) {
+    const { gameId } = data || {};
     const rematch = bughouseRematches.get(gameId);
     if (!rematch) {
       socket.emit('bughouse_error', 'Rematch offer has expired or is invalid.');
       return;
     }
 
+    socket.join(`bughouse_game_${gameId}`);
+
     const userId = String(socket.userId);
     let userLobbyId = null;
+    let opponentPlayers = [];
 
-    // Verify the user is the host/captain of their team
-    if (userId === rematch.lobbyId1) {
-      userLobbyId = rematch.lobbyId1;
-    } else if (userId === rematch.lobbyId2) {
-      userLobbyId = rematch.lobbyId2;
-    }
+    const isCaptainA = (userId === String(rematch.lobbyId1));
+    const isCaptainB = (userId === String(rematch.lobbyId2));
 
-    if (!userLobbyId) {
-      socket.emit('bughouse_error', 'Only team captains can offer a rematch.');
+    if (!isCaptainA && !isCaptainB) {
+      socket.emit('bughouse_error', 'Only team captains can offer or accept a rematch.');
       return;
     }
 
+    if (isCaptainA) {
+      userLobbyId = String(rematch.lobbyId1);
+      opponentPlayers = rematch.teamBPlayers || [];
+    } else {
+      userLobbyId = String(rematch.lobbyId2);
+      opponentPlayers = rematch.teamAPlayers || [];
+    }
+
+    const opponentOnline = opponentPlayers.some(id => activePlayers.has(String(id)));
+    if (!opponentOnline) {
+      socket.emit('bughouse_error', 'Opponent team is offline.');
+      return;
+    }
+
+    const lobbyCooldown = declinedLobbies.get(userLobbyId) || 0;
+    const matchCooldown = rematch.cooldownUntil || 0;
+    const activeCooldown = Math.max(lobbyCooldown, matchCooldown);
+    if (activeCooldown && Date.now() < activeCooldown) {
+      const remainingSecs = Math.ceil((activeCooldown - Date.now()) / 1000);
+      socket.emit('bughouse_error', `Please wait ${remainingSecs}s before offering a rematch again.`);
+      return;
+    }
+
+    const now = Date.now();
+    if (!rematch.rateLimits) rematch.rateLimits = new Map();
+    const timestamps = (rematch.rateLimits.get(userLobbyId) || []).filter(t => now - t < 60000);
+    if (timestamps.length >= 2) {
+      socket.emit('bughouse_error', 'Rematch offers rate-limited (max 2 per minute).');
+      return;
+    }
+    timestamps.push(now);
+    rematch.rateLimits.set(userLobbyId, timestamps);
+
     rematch.offers.add(userLobbyId);
-    io.to(`bughouse_game_${gameId}`).emit('bughouse_rematch_status', {
+
+    if (rematch.offers.size === 1) {
+      if (rematch.offerTimeoutId) {
+        clearTimeout(rematch.offerTimeoutId);
+      }
+      const OFFER_TIMEOUT_MS = 60000;
+      rematch.offerTimeoutId = setTimeout(() => {
+        if (bughouseRematches.has(gameId)) {
+          const currentRematch = bughouseRematches.get(gameId);
+          if (currentRematch.offers.size === 1) {
+            currentRematch.offers.clear();
+            currentRematch.offerTimeoutId = null;
+            broadcastRematchEvent(io, currentRematch, 'bughouse_rematch_offer_expired', {
+              gameId,
+              message: 'Rematch offer expired (no response).',
+            });
+            broadcastRematchEvent(io, currentRematch, 'bughouse_rematch_status', {
+              gameId,
+              offers: [],
+              seriesRound: currentRematch.seriesRound,
+            });
+            console.log(`[Bughouse] Rematch offer for game ${gameId} expired due to no response.`);
+          }
+        }
+      }, OFFER_TIMEOUT_MS);
+    }
+
+    broadcastRematchEvent(io, rematch, 'bughouse_rematch_status', {
       gameId,
       offers: Array.from(rematch.offers),
+      seriesRound: rematch.seriesRound,
     });
 
-    console.log(`[Bughouse] Team ${userLobbyId} offered rematch for game ${gameId}`);
+    // console.log(`[Bughouse] Team ${userLobbyId} offered/accepted rematch for game ${gameId}`);
 
     if (rematch.offers.size === 2) {
-      if (rematch.timeoutId) {
-        clearTimeout(rematch.timeoutId);
+      if (rematch.offerTimeoutId) {
+        clearTimeout(rematch.offerTimeoutId);
+        rematch.offerTimeoutId = null;
+      }
+      if (rematch.silentCleanupId) {
+        clearTimeout(rematch.silentCleanupId);
+        rematch.silentCleanupId = null;
       }
       bughouseRematches.delete(gameId);
 
       const lobby1 = bughouseLobbies.get(rematch.lobbyId1);
       const lobby2 = bughouseLobbies.get(rematch.lobbyId2);
 
-      createBughouseMatch(io, lobby1, lobby2, rematch.previousColors);
+      createBughouseMatch(io, lobby1, lobby2, rematch.previousColors, {
+        prevGameId: gameId,
+        seriesRound: rematch.seriesRound,
+        seriesScore: rematch.seriesScore,
+      });
     }
-  });
+  }
 
-  socket.on('bughouse_decline_rematch', (data) => {
-    const { gameId } = data;
+  function handleRematchNo(socket, io, data) {
+    const { gameId } = data || {};
     const rematch = bughouseRematches.get(gameId);
     if (!rematch) return;
 
+    socket.join(`bughouse_game_${gameId}`);
+
     const userId = String(socket.userId);
-    if (userId === rematch.lobbyId1 || userId === rematch.lobbyId2) {
-      if (rematch.timeoutId) {
-        clearTimeout(rematch.timeoutId);
-      }
-      bughouseRematches.delete(gameId);
-      io.to(`bughouse_game_${gameId}`).emit('bughouse_rematch_cancelled', { gameId });
-      console.log(`[Bughouse] Rematch for game ${gameId} was cancelled/declined by ${userId}`);
+    const isCaptainA = (userId === String(rematch.lobbyId1));
+    const isCaptainB = (userId === String(rematch.lobbyId2));
+
+    if (!isCaptainA && !isCaptainB) {
+      socket.emit('bughouse_error', 'Only team captains can decline or cancel a rematch.');
+      return;
     }
-  });
+
+    const userLobbyId = isCaptainA ? String(rematch.lobbyId1) : String(rematch.lobbyId2);
+
+    if (rematch.offerTimeoutId) {
+      clearTimeout(rematch.offerTimeoutId);
+      rematch.offerTimeoutId = null;
+    }
+
+    if (rematch.offers.has(userLobbyId) && rematch.offers.size === 1) {
+      rematch.offers.clear();
+      broadcastRematchEvent(io, rematch, 'bughouse_rematch_status', {
+        gameId,
+        offers: [],
+        seriesRound: rematch.seriesRound,
+      });
+      broadcastRematchEvent(io, rematch, 'bughouse_rematch_cancelled', {
+        gameId,
+        reason: 'cancelled_by_team',
+      });
+      console.log(`[Bughouse] Rematch offer for game ${gameId} was cancelled by offerer team ${userLobbyId}`);
+      return;
+    }
+
+    rematch.offers.clear();
+    const COOLDOWN_MS = 60000;
+    const cooldownUntil = Date.now() + COOLDOWN_MS;
+    rematch.cooldownUntil = cooldownUntil;
+
+    declinedLobbies.set(String(rematch.lobbyId1), cooldownUntil);
+    declinedLobbies.set(String(rematch.lobbyId2), cooldownUntil);
+
+    broadcastRematchEvent(io, rematch, 'bughouse_rematch_declined', {
+      gameId,
+      declinedBy: userId,
+      cooldownMs: COOLDOWN_MS,
+      cooldownUntil,
+    });
+    broadcastRematchEvent(io, rematch, 'bughouse_rematch_status', {
+      gameId,
+      offers: [],
+      seriesRound: rematch.seriesRound,
+    });
+
+    console.log(`[Bughouse] Rematch offer for game ${gameId} declined by team ${userLobbyId}. 60s cooldown applied.`);
+  }
+
+  socket.on('bughouse_rematch_yes', (data) => handleRematchYes(socket, io, data));
+  socket.on('bughouse_offer_rematch', (data) => handleRematchYes(socket, io, data));
+
+  socket.on('bughouse_rematch_no', (data) => handleRematchNo(socket, io, data));
+  socket.on('bughouse_decline_rematch', (data) => handleRematchNo(socket, io, data));
+  socket.on('bughouse_cancel_rematch', (data) => handleRematchNo(socket, io, data));
 }
 
 function checkAndMatchLobbies(io) {
@@ -143,8 +312,7 @@ function checkAndMatchLobbies(io) {
  * @param {Object} lobby2             The second team lobby.
  * @param {Object|null} previousColors Optional colors assignment from the previous game to alternate.
  */
-function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
-  // ATOMIC STATE CHECK: Ensure both lobbies exist, are not currently in an active game, and have partners.
+function createBughouseMatch(io, lobby1, lobby2, previousColors = null, rematchMeta = null) {
   if (!lobby1 || !lobby2) return;
   if (!lobby1.partner || !lobby2.partner) return;
 
@@ -156,7 +324,7 @@ function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
   ];
   for (const uid of players) {
     if (activePlayerGames.has(uid)) {
-      console.log(`[Matchmaking] Cannot create match: Player ${uid} is already in an active game.`);
+      // console.log(`[Matchmaking] Cannot create match: Player ${uid} is already in an active game.`);
       return;
     }
   }
@@ -174,7 +342,6 @@ function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
   let teamA_captainName, teamA_partnerName, teamB_captainName, teamB_partnerName;
 
   if (previousColors) {
-    // BUGHOUSE RULE: Invert color assignments for the rematch so players alternate colors
     const players = [
       String(lobby1.captain.userId),
       String(lobby1.partner.userId),
@@ -192,7 +359,6 @@ function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
       }
     }
 
-    // Resolve IDs based on inverted colors
     for (const uid in colors) {
       const assignment = colors[uid];
       if (assignment.board === 'A' && assignment.color === 'w') whiteA_id = uid;
@@ -249,15 +415,23 @@ function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
     [whiteB_id]: { board: 'B', color: 'w' },
   };
 
-  const gameId = `${lobbyId1}_${lobbyId2}`;
+  const cryptoSuffix = crypto.randomBytes(4).toString('hex');
+  const gameId = `${lobbyId1}_${lobbyId2}_${cryptoSuffix}`;
   const chessA = new Chess();
   const chessB = new Chess();
 
   const initialClocks = { A_W: DEFAULT_TIME, A_B: DEFAULT_TIME, B_W: DEFAULT_TIME, B_B: DEFAULT_TIME };
   const variant = lobby1.variant || lobby2.variant || 'cannibal';
 
+  const seriesRound = rematchMeta ? (rematchMeta.seriesRound || 1) + 1 : 1;
+  const seriesScore = rematchMeta?.seriesScore || { [teamA_captainId]: 0, [teamB_captainId]: 0 };
+  const rematchOf = rematchMeta?.prevGameId || null;
+
   const game = {
     gameId,
+    rematchOf,
+    seriesRound,
+    seriesScore,
     variant,
     teamA: { captainId: teamA_captainId, partnerId: teamA_partnerId, captainName: teamA_captainName, partnerName: teamA_partnerName },
     teamB: { captainId: teamB_captainId, partnerId: teamB_partnerId, captainName: teamB_captainName, partnerName: teamB_partnerName },
@@ -287,8 +461,30 @@ function createBughouseMatch(io, lobby1, lobby2, previousColors = null) {
     }
   }
 
+  if (rematchOf) {
+    const takenPayload = {
+      prevGameId: rematchOf,
+      nextGameId: gameId,
+      seriesRound,
+      seriesScore,
+    };
+    io.to(`bughouse_game_${rematchOf}`).emit('bughouse_rematch_taken', takenPayload);
+    for (const uid of allUserIds) {
+      const socketId = activePlayers.get(uid);
+      if (socketId) {
+        io.to(socketId).emit('bughouse_rematch_taken', takenPayload);
+      }
+    }
+    io.to(`bughouse_lobby_${lobbyId1}`).emit('bughouse_rematch_taken', takenPayload);
+    io.to(`bughouse_lobby_${lobbyId2}`).emit('bughouse_rematch_taken', takenPayload);
+    console.log(`[Bughouse] Emitted bughouse_rematch_taken: ${rematchOf} -> ${gameId} (Round ${seriesRound})`);
+  }
+
   const startPayload = {
     gameId,
+    rematchOf,
+    seriesRound,
+    seriesScore,
     variant,
     colors,
     teamA: { captainName: teamA_captainName, partnerId: teamA_partnerId, partnerName: teamA_partnerName, captainId: teamA_captainId },

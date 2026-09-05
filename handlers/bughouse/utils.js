@@ -1,5 +1,5 @@
 const { activePlayers } = require('../../active-players');
-const { bughouseGames, bughouseLobbies, bughouseQueue, activePlayersLobby, activePlayerGames, bughouseRematches } = require('./state');
+const { bughouseGames, bughouseLobbies, bughouseQueue, activePlayersLobby, activePlayerGames, bughouseRematches, declinedLobbies } = require('./state');
 
 function emptyPocket() {
   return { p: 0, n: 0, b: 0, r: 0, q: 0 };
@@ -119,7 +119,6 @@ function endBughouseGame(io, game, winner, reason) {
 
   bughouseGames.delete(game.gameId);
 
-  // Reset participating team lobbies status back to 'waiting'
   if (game.teamA && game.teamA.captainId) {
     const lobbyA = bughouseLobbies.get(String(game.teamA.captainId));
     if (lobbyA) {
@@ -133,27 +132,66 @@ function endBughouseGame(io, game, winner, reason) {
     }
   }
 
-  // AI-GENERATED WORKAROUND: Initialize rematch offer record with 90-second TTL to prevent memory leaks.
   const gameId = game.gameId;
-  const timeoutId = setTimeout(() => {
+  const silentCleanupId = setTimeout(() => {
     if (bughouseRematches.has(gameId)) {
       bughouseRematches.delete(gameId);
-      io.to(`bughouse_game_${gameId}`).emit('bughouse_rematch_cancelled', { gameId });
-      console.log(`[Bughouse] Rematch offer expired for game ${gameId}`);
+      console.log(`[Bughouse] Stale rematch record silently cleaned up for game ${gameId}`);
     }
-  }, 90000);
+  }, 30 * 60 * 1000);
+
+  const teamA_capId = game.teamA ? String(game.teamA.captainId) : '';
+  const teamA_partId = game.teamA && game.teamA.partnerId ? String(game.teamA.partnerId) : '';
+  const teamB_capId = game.teamB ? String(game.teamB.captainId) : '';
+  const teamB_partId = game.teamB && game.teamB.partnerId ? String(game.teamB.partnerId) : '';
+
+  const seriesRound = game.seriesRound || 1;
+  const seriesScore = game.seriesScore || { [teamA_capId]: 0, [teamB_capId]: 0 };
+  if (winner === 'Team A' && teamA_capId) {
+    seriesScore[teamA_capId] = (seriesScore[teamA_capId] || 0) + 1;
+  } else if (winner === 'Team B' && teamB_capId) {
+    seriesScore[teamB_capId] = (seriesScore[teamB_capId] || 0) + 1;
+  }
+
+  const lobby1Cooldown = (teamA_capId && declinedLobbies.get(teamA_capId)) || 0;
+  const lobby2Cooldown = (teamB_capId && declinedLobbies.get(teamB_capId)) || 0;
+  const activeCooldownUntil = Math.max(lobby1Cooldown, lobby2Cooldown);
+
+  const allGamePlayers = Array.from(new Set([
+    teamA_capId,
+    teamA_partId,
+    teamB_capId,
+    teamB_partId,
+    ...(game.colors ? Object.keys(game.colors).map(String) : [])
+  ])).filter(Boolean);
 
   bughouseRematches.set(gameId, {
     gameId,
-    lobbyId1: game.teamA.captainId,
-    lobbyId2: game.teamB.captainId,
+    prevGameId: game.rematchOf || null,
+    seriesRound,
+    seriesScore,
+    lobbyId1: teamA_capId,
+    lobbyId2: teamB_capId,
+    allPlayers: allGamePlayers,
+    teamAPlayers: [teamA_capId, teamA_partId].filter(Boolean),
+    teamBPlayers: [teamB_capId, teamB_partId].filter(Boolean),
     previousColors: game.colors,
     offers: new Set(),
-    timeoutId,
+    offerTimeoutId: null,
+    silentCleanupId,
+    cooldownUntil: activeCooldownUntil > Date.now() ? activeCooldownUntil : 0,
+    rateLimits: new Map(),
   });
 
-  io.to(`bughouse_game_${game.gameId}`).emit('bughouse_game_over', { gameId: game.gameId, winner, reason });
-  console.log(`[Bughouse] Game ${game.gameId} ended — ${winner}: ${reason}`);
+  io.to(`bughouse_game_${game.gameId}`).emit('bughouse_game_over', {
+    gameId: game.gameId,
+    winner,
+    reason,
+    seriesRound,
+    seriesScore,
+    cooldownUntil: activeCooldownUntil > Date.now() ? activeCooldownUntil : 0,
+  });
+  console.log(`[Bughouse] Game ${game.gameId} ended — ${winner}: ${reason} (Series Round ${seriesRound})`);
   broadcastActiveGames(io);
 }
 
@@ -162,15 +200,21 @@ function leaveCurrentLobby(socket, io) {
   const lobbyId = activePlayersLobby.get(userId);
   if (!lobbyId) return;
 
-  // AI-GENERATED WORKAROUND: Cancel and clean up any pending rematches associated with the leaving lobby.
+  declinedLobbies.delete(lobbyId);
+
   for (const [gameId, rematch] of bughouseRematches.entries()) {
     if (rematch.lobbyId1 === lobbyId || rematch.lobbyId2 === lobbyId) {
-      if (rematch.timeoutId) {
-        clearTimeout(rematch.timeoutId);
+      if (rematch.offerTimeoutId) {
+        clearTimeout(rematch.offerTimeoutId);
       }
-      io.to(`bughouse_game_${gameId}`).emit('bughouse_rematch_cancelled', { gameId });
+      if (rematch.silentCleanupId) {
+        clearTimeout(rematch.silentCleanupId);
+      }
+      if (rematch.offers.size > 0) {
+        io.to(`bughouse_game_${gameId}`).emit('bughouse_rematch_cancelled', { gameId, reason: 'lobby_left' });
+      }
       bughouseRematches.delete(gameId);
-      console.log(`[Bughouse] Rematch for game ${gameId} cancelled because lobby ${lobbyId} left.`);
+      console.log(`[Bughouse] Rematch for game ${gameId} cleaned up because lobby ${lobbyId} left.`);
     }
   }
 

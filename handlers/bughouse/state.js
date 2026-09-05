@@ -10,6 +10,8 @@ const bughouseGames = new Map();
 const activePlayerGames = new Map();
 /** gameId → rematch state */
 const bughouseRematches = new Map();
+/** lobbyId → lockout expiry timestamp (60s cooldown memo) */
+const declinedLobbies = new Map();
 
 module.exports = {
   bughouseLobbies,
@@ -18,4 +20,5 @@ module.exports = {
   bughouseGames,
   activePlayerGames,
   bughouseRematches,
+  declinedLobbies,
 };

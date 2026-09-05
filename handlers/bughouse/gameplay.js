@@ -1,3 +1,4 @@
+const { activePlayers } = require('../../active-players');
 const { bughouseGames } = require('./state');
 const { applyDropToChess, transferCapture, checkGameOverOnChess, endBughouseGame } = require('./utils');
 const { executeCannibalPromotion, getCannibalAvailability } = require('./bughouse-promotion-rules');
@@ -62,7 +63,6 @@ function registerGameplayHandlers(socket, io) {
         }
 
         socket.emit('bughouse_error', cannibalResult.error || 'Cannibal promotion failed.');
-        // Re-sync authoritative state to promoting player to cancel client-side optimistic move
         socket.emit('bughouse_move_broadcast', {
           gameId,
           board,
@@ -219,14 +219,16 @@ function registerGameplayHandlers(socket, io) {
     const colorInfo = game.colors[myUserId];
     if (!colorInfo) return;
 
-    let losingTeam;
-    const isTeamA =
-      String(game.teamA.captainId) === myUserId ||
-      String(game.teamA.partnerId) === myUserId;
-    losingTeam = isTeamA ? 'Team A' : 'Team B';
-    const winner = losingTeam === 'Team A' ? 'Team B' : 'Team A';
+    const isTeamACaptain = String(game.teamA.captainId) === myUserId;
+    const isTeamBCaptain = String(game.teamB.captainId) === myUserId;
+    if (!isTeamACaptain && !isTeamBCaptain) {
+      socket.emit('bughouse_error', 'Only team captains can resign.');
+      return;
+    }
 
-    endBughouseGame(io, game, winner, `${socket.userName} resigned`);
+    const winner = isTeamACaptain ? 'Team B' : 'Team A';
+
+    endBughouseGame(io, game, winner, `${socket.userName || 'Captain'} resigned`);
   });
 
   socket.on('bughouse_offer_draw', (data) => {
@@ -238,20 +240,31 @@ function registerGameplayHandlers(socket, io) {
     const colorInfo = game.colors[myUserId];
     if (!colorInfo) return;
 
+    const isTeamACaptain = String(game.teamA.captainId) === myUserId;
+    const isTeamBCaptain = String(game.teamB.captainId) === myUserId;
+    if (!isTeamACaptain && !isTeamBCaptain) {
+      socket.emit('bughouse_error', 'Only team captains can offer a draw.');
+      return;
+    }
+
     if (!game.drawOffers) game.drawOffers = new Set();
     game.drawOffers.add(myUserId);
 
-    // Broadcast the draw offer to all players in the game
-    io.to(`bughouse_game_${gameId}`).emit('bughouse_draw_offered', {
-      gameId,
-      offeredBy: socket.userName || myUserId,
-    });
+    const captainA = String(game.teamA.captainId);
+    const captainB = String(game.teamB.captainId);
 
-    // If all 4 players have offered draw, end as draw
-    const allPlayerIds = Object.keys(game.colors);
-    const allAccepted = allPlayerIds.every((uid) => game.drawOffers.has(uid));
-    if (allAccepted) {
+    if (game.drawOffers.has(captainA) && game.drawOffers.has(captainB)) {
       endBughouseGame(io, game, 'Draw', 'Draw by mutual agreement');
+      return;
+    }
+
+    const otherCaptainId = isTeamACaptain ? captainB : captainA;
+    const otherCaptainSocketId = activePlayers.get(otherCaptainId);
+    if (otherCaptainSocketId) {
+      io.to(otherCaptainSocketId).emit('bughouse_draw_offered', {
+        gameId,
+        offeredBy: socket.userName,
+      });
     }
   });
 }

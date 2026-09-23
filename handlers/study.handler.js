@@ -222,10 +222,10 @@ function setupStudyHandlers(socket, io) {
     if (!study) return;
 
     console.log(`[Study] Shapes drawn in study ${studyId}, chapter ${chapterId} by ${socket.userId}`);
-    study.shapes = shapes;
-    study.shapesChapterId = chapterId;
-    study.shapesFen = fen;
-    io.to(String(studyId)).emit('study_shapes_drawn', { shapes, userId: socket.userId, chapterId, fen });
+    study.shapes = shapes || [];
+    study.shapesChapterId = chapterId || null;
+    study.shapesFen = fen || null;
+    io.to(String(studyId)).emit('study_shapes_drawn', { shapes: shapes || [], userId: socket.userId, chapterId, fen });
   });
 
   socket.on('study_change_chapter', (data) => {

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * game.handler.js
  *
  * Server-authoritative 1v1 chess game handler.
@@ -26,7 +26,7 @@
 
 'use strict';
 
-const { Chess } = require('chess.js');
+const { Chess } = require('@von/chess');
 const { activePlayers } = require('../active-players');
 
 // ─── Active game store ────────────────────────────────────────────────────────

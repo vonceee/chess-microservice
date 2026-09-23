@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { Chess } = require('chess.js');
+const { Chess } = require('@von/chess');
 const {
   getCannibalTargetInfo,
   isKingInCheckForColor,

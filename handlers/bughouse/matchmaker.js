@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const Chess = require('chess.js').Chess;
+const Chess = require('@von/chess').Chess;
 const { activePlayers } = require('../../active-players');
 const { bughouseLobbies, bughouseQueue, bughouseGames, activePlayerGames, bughouseRematches, declinedLobbies, activePlayersLobby } = require('./state');
 const { emptyPocket, endBughouseGame, broadcastActiveGames } = require('./utils');

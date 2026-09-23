@@ -1,4 +1,4 @@
-const { Chess } = require('chess.js');
+const { Chess } = require('@von/chess');
 
 /**
  * Helper function to parse time control

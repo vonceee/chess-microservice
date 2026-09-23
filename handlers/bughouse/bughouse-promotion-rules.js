@@ -1,4 +1,4 @@
-const { Chess } = require('chess.js');
+const { Chess } = require('@von/chess');
 
 /**
  * Resolves the target board, reserve pockets, and target pluck color for a promoting player.

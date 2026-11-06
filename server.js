@@ -13,7 +13,7 @@ const server = http.createServer(app);
 
 // START LISTENING IMMEDIATELY
 // This prevents "Port scan timeout" on Render while modules load
-const PORT = process.env.PORT || 3006;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`[Bootstrap] Chess microservice listening on port ${PORT}`);
   console.log(`[Bootstrap] Binding successful. Initializing modules...`);

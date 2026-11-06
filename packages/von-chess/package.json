@@ -1,0 +1,34 @@
+{
+  "name": "@von/chess",
+  "version": "1.0.1",
+  "description": "High-performance, zero-dependency, 1:1 drop-in chess engine for VON.CHESS",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "tsx --test tests/*.spec.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  },
+  "license": "MIT"
+}

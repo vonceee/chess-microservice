@@ -1047,7 +1047,7 @@ var PositionState = class {
   }
   /**
    * Checks if a King is currently in check.
-   * If color is provided, checks for that specific color (Bughouse extension).
+   * If color is provided, checks for that specific color.
    * If omitted, checks for the side whose turn it is.
    */
   isCheck(color) {
@@ -1592,7 +1592,7 @@ var Chess = class {
   }
   /**
    * Returns true if king is in check.
-   * If color parameter is supplied, tests safety for that color (Bughouse extension).
+   * If color parameter is supplied, tests safety for that specific color.
    */
   isCheck(color) {
     return this.state.isCheck(color);

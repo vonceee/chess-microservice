@@ -1,5 +1,4 @@
 const { setupStudyHandlers } = require('./study.handler');
-const { setupBughouseHandlers } = require('./bughouse.handler');
 const { setupGameHandlers } = require('./game.handler');
 const { activePlayers } = require('../active-players');
 
@@ -13,7 +12,6 @@ function setupSocketHandlers(io) {
 
     // Wire up modular handlers
     setupStudyHandlers(socket, io);
-    setupBughouseHandlers(socket, io);
     setupGameHandlers(socket, io);
 
     // Global disconnection handler

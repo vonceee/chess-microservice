@@ -192,7 +192,7 @@ declare function sanitizePgnHeaders(headers: Record<string, string | undefined>)
  * legacy aliases (v0.12), and tailored extensions for VON.CHESS.
  *
  * WHY: Replaces 3rd-party chess.js with zero refactoring needed across callers,
- * while improving PGN resilience and providing color-agnostic king safety for Bughouse.
+ * while improving PGN resilience and providing color-agnostic king safety evaluations.
  */
 
 declare class Chess {
@@ -278,7 +278,7 @@ declare class Chess {
     remove(square: Square | string): Piece | null;
     /**
      * Returns true if king is in check.
-     * If color parameter is supplied, tests safety for that color (Bughouse extension).
+     * If color parameter is supplied, tests safety for that specific color.
      */
     isCheck(color?: Color): boolean;
     /**
